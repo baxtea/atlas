@@ -4,10 +4,11 @@ project(atlas VERSION 0.0.0)
 include(CTest)
 enable_testing()
 
-add_subdirectory("Anvil")
+add_subdirectory("deps/Anvil")
 
 include_directories("deps/Anvil/deps"
-                    "deps/Anvil/include")
+                    "deps/Anvil/include"
+                    "deps/VulkanMemoryAllocator/src")
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../lib)

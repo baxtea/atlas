@@ -54,7 +54,7 @@
 #include "wrappers/semaphore.h"
 #include "wrappers/shader_module.h"
 #include "wrappers/swapchain.h"
-#include "start_vulkan.h"
+#include "stolen_anvil_demo.h"
 
 /* Sanity checks */
 #if defined(_WIN32)
