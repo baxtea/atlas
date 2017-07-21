@@ -1,6 +1,3 @@
-[submodule "Anvil"]
-	path = deps/Anvil
-	url = https://github.com/GPUOpen-LibrariesAndSDKs/Anvil
 [submodule "deps/VulkanMemoryAllocator"]
 	path = deps/VulkanMemoryAllocator
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
