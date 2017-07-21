@@ -2,9 +2,8 @@
 #include <math.h>
 
 using namespace Atlas;
-using namespace Math;
 
-glm::quat get_rotation_to(const glm::vec3& u, const glm::vec3& v, const glm::vec3& fallback_axis) {
+glm::quat Math::get_rotation_to(const glm::vec3& u, const glm::vec3& v, const glm::vec3& fallback_axis) {
     // From Sam Hocevar's article Quaternion from two vectors: the final version'
     // http://sam.hocevar.net/blog/category/maths/
 
@@ -33,7 +32,7 @@ glm::quat get_rotation_to(const glm::vec3& u, const glm::vec3& v, const glm::vec
     return glm::normalize(glm::quat(real_part, axis));
 }
 
-glm::mat3 mat3_from_axes(const std::array<glm::vec3, 3> xyz) {
+glm::mat3 Math::mat3_from_axes(const std::array<glm::vec3, 3> xyz) {
     glm::mat3 rot_from_axes;
 
     for (size_t col = 0; col < 3; ++col) {
@@ -45,7 +44,7 @@ glm::mat3 mat3_from_axes(const std::array<glm::vec3, 3> xyz) {
     return rot_from_axes;
 }
 
-std::array<glm::vec3, 3> axes_from_mat3(const glm::mat3& mat) {
+std::array<glm::vec3, 3> Math::axes_from_mat3(const glm::mat3& mat) {
     std::array<glm::vec3, 3> axes;
 
     for (size_t col = 0; col < 3; ++col) {

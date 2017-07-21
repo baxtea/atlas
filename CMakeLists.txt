@@ -24,7 +24,6 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 
 set(ATLAS_SRC_LIST  "include/atlas.h"
-                    "include/err.h"
                     "include/mesh.h"
                     "include/camera.h"
                     "include/my_math.h"
@@ -55,6 +54,9 @@ endif()
 
 add_executable(call_lib demos/call_lib.cpp)
 target_link_libraries(call_lib atlas vulkan)
+
+add_executable(breakout demos/breakout.cpp)
+target_link_libraries(breakout atlas vulkan)
 
 add_executable(start_vulkan demos/stolen_anvil_demo.cpp)
 add_dependencies(start_vulkan atlas)

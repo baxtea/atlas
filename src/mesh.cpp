@@ -38,7 +38,7 @@ std::shared_ptr<StaticMesh> StaticMesh::create_primitive::box(float width, float
         vertices.data() // data to initialize buffer with
     );
     if (!mesh->m_vertex_buffer) {
-        std::cerr << "[!] Failed to create vertex buffer for box primitive\n";
+        fprintf(stderr, "[!] Failed to create vertex buffer for box primitive\n");
         return nullptr;
     }
 
@@ -59,7 +59,7 @@ std::shared_ptr<StaticMesh> StaticMesh::create_primitive::box(float width, float
         indices.data() // data to initialize buffer with
     );
     if (!mesh->m_index_buffer) {
-        std::cerr << "[!] Failed to create index buffer for box primitive\n";
+        fprintf(stderr, "[!] Failed to create index buffer for box primitive\n");
         return nullptr;
     }
     

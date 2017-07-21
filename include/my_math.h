@@ -10,7 +10,7 @@ namespace Atlas {
         glm::quat get_rotation_to(const glm::vec3& src, const glm::vec3& dest, const glm::vec3& fallback_axis = glm::vec3(0,0,0));
 
         glm::mat3 mat3_from_axes(const std::array<glm::vec3, 3> xyz);
-        std::array<glm::vec3, 3> axes_from_mat3(const glm::mat3 mat);
+        std::array<glm::vec3, 3> axes_from_mat3(const glm::mat3& mat);
     }
 }
 
