@@ -39,13 +39,14 @@ void Atlas::init_vulkan(const std::string& appName, Anvil::PFNINSTANCEDEBUGCALLB
         false); // support resettable command buffer allocations
 }
 
-std::shared_ptr<Anvil::ShaderModuleStageEntryPoint> Atlas::Shader::entry_point() {
+std::shared_ptr<Anvil::ShaderModuleStageEntryPoint> Atlas::shader_entry_point_none() {
     return std::make_shared<Anvil::ShaderModuleStageEntryPoint>();
 }
 
-std::shared_ptr<Anvil::ShaderModuleStageEntryPoint> Atlas::Shader::entry_point(std::shared_ptr<Anvil::ShaderModule> module, Anvil::ShaderStage stage, const std::string& func_name) {
+std::shared_ptr<Anvil::ShaderModuleStageEntryPoint> Atlas::shader_entry_point(std::shared_ptr<Anvil::ShaderModule> module, Anvil::ShaderStage stage, const std::string& func_name) {
     return std::make_shared<Anvil::ShaderModuleStageEntryPoint>(func_name.c_str(), module, stage);
 }
+
 
 
 

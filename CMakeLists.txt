@@ -16,6 +16,22 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../bin)
 
+set(ATLAS_SRC_LIST  "include/atlas.h"
+                    "include/mesh.h"
+                    "include/camera.h"
+                    "include/my_math.h"
+                    "include/window.h"
+                    
+                    "src/atlas.cpp"
+                    "src/mesh.cpp"
+                    "src/camera.cpp"
+                    "src/my_math.cpp"
+                    "src/window.cpp")
+
+# TODO: Change window implementation options
+add_definitions(-DATLAS_WINDOW_IMPL_XCB=1)
+add_library(atlas ${ATLAS_SRC_LIST})
+
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   # Enable vulkan layers
   target_compile_definitions(atlas ENABLE_VALIDATION=1)
@@ -23,22 +39,12 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   target_compile_definitions(atlas GLM_FORCE_DEPTH_ZERO_TO_ONE=1)
 endif()
 
-set(ATLAS_SRC_LIST  "include/atlas.h"
-                    "include/mesh.h"
-                    "include/camera.h"
-                    "include/my_math.h"
-                    
-                    "src/atlas.cpp"
-                    "src/mesh.cpp"
-                    "src/camera.cpp"
-                    "src/my_math.cpp")
-
-add_library(atlas ${ATLAS_SRC_LIST})
 add_dependencies(atlas Anvil)
 if (WIN32)
     target_link_libraries(atlas Anvil)
 else()
-    target_link_libraries(atlas Anvil dl)
+    # TODO: Optional link with xcb
+    target_link_libraries(atlas Anvil dl xcb)
 endif()
 
 if (CMAKE_GENERATOR STREQUAL "Visual Studio 6")
