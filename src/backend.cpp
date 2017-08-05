@@ -20,7 +20,7 @@ void Backend::error(const std::string& message) {
     Instance::default_dbg_callback(VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT, 0, 0, 0, "App", message.c_str(), nullptr);
 }
 
-bool Backend::validate(VkResult result) {
+bool Atlas::validate(VkResult result) {
     switch (result) {
     case VK_SUCCESS:
     case VK_EVENT_SET:
@@ -420,6 +420,10 @@ Device::Device(const Instance& source, uint32_t physical_device_index)
             m_supported_extensions.insert(ext.extensionName);
         }
     }
+
+    enabled_extensions = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    };
 }
 
 bool Device::init() {
@@ -581,8 +585,4 @@ Device::~Device() {
 
 bool Device::is_extension_supported(const std::string& name) const {
     return (m_supported_extensions.find(name) != m_supported_extensions.end());
-}
-
-VkCommandPool Device::get_command_pool(QueueFamily family, uint32_t thread_index) {
-    return m_command_pools[thread_index * QUEUE_FAMILY_COUNT + family];
 }

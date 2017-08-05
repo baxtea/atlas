@@ -27,7 +27,7 @@ namespace Atlas {
         bool m_yaw_is_fixed;
         glm::vec3 m_fixed_yaw_axis;
     public:
-        Camera(const std::string& name);
+        Camera(const std::string& name="Camera");
         ~Camera() = default;
         const std::string& get_name() const;
 

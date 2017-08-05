@@ -2,13 +2,12 @@
 #define ATLAS_MESH_H
 
 #include <memory>
-#include "wrappers/device.h"
-#include "wrappers/buffer.h"
 
 namespace Atlas {
 
     // Contains vertices, indices. maybe normals, tex coords, ...bone weights?
     // Does not handle textures or materials
+    /*
     class StaticMesh {
         struct Hidden {};
         StaticMesh() = default;
@@ -34,6 +33,7 @@ namespace Atlas {
     class SkeletalMesh {
         // TODO
     };
+    */
 }
 
 #endif // ATLAS_MESH_H

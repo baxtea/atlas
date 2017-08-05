@@ -17,11 +17,11 @@
 #include "vk_mem_alloc.h"
 
 namespace Atlas {
+    bool validate(VkResult result);
     namespace Backend {
         static void log(const std::string& message);
         static void warning(const std::string& message);
         static void error(const std::string& message);
-        bool validate(VkResult result);
 
         enum VendorID {
             VK_VENDOR_ID_AMD = 0x1002,
@@ -120,7 +120,21 @@ namespace Atlas {
             std::vector<const char*> enabled_extensions;
             // For any optional extension, only push_back if this returns true
             bool is_extension_supported(const std::string& name) const;
-            VkCommandPool get_command_pool(QueueFamily family, uint32_t thread_index = 0);
+            inline VkCommandPool get_command_pool(QueueFamily family, uint32_t thread_index) const {
+                return m_command_pools[thread_index * QUEUE_FAMILY_COUNT + family];
+            }
+            inline VkQueue get_queue(QueueFamily family) const {
+                return m_queues[family];
+            }
+            inline const PhysicalDevice& get_physical_device() const {
+                return m_physical_device;
+            }
+            inline VkDevice vk() const {
+                return m_device;
+            }
+            inline VkInstance vk_instance() const {
+                return m_instance;
+            }
         protected:
             std::unordered_set<std::string> m_supported_extensions;
             VkInstance m_instance;
@@ -130,12 +144,30 @@ namespace Atlas {
             VmaAllocator m_allocator;
 
             std::vector<VkCommandPool> m_command_pools;
-            VkQueue m_universal_queue, m_compute_queue, m_transfer_queue;
+            union {
+                struct { VkQueue m_universal_queue, m_compute_queue, m_transfer_queue; };
+                VkQueue m_queues[QUEUE_FAMILY_COUNT];
+            };
             static constexpr uint32_t compute_owns_self = 1;
             static constexpr uint32_t compute_is_dedicated = 1 << 1;
             static constexpr uint32_t transfer_owns_self = 1 << 2;
             static constexpr uint32_t transfer_is_dedicated = 1 << 3;
             uint32_t m_queue_flags;
+        };
+
+        struct CommandBuffer {
+            // Create a primary command buffer
+            CommandBuffer(const Device& device);
+            // Create a secondary command buffer
+            CommandBuffer(const Device& device, const CommandBuffer& primary);
+
+
+            void submit();
+        
+        protected:
+            VkCommandPool m_parent;
+            VkQueue m_queue;
+            VkCommandBuffer m_buffer;
         };
     }
 }

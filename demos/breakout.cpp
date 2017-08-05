@@ -1,7 +1,8 @@
-#include "atlas.h"
+#include "backend.h"
+#include "window.h"
 #include <chrono>
 
-const char * vert_source = 
+const char* vert_source = 
 "#version 430\n"
 "layout (location = 0) in vec3 pos;\n"
 "layout (location = 1) in vec3 color_in;\n"
@@ -11,7 +12,7 @@ const char * vert_source =
 "  color_out = color_in;\n"
 "}\n";
 
-const char * frag_source = 
+const char* frag_source = 
 "#version 430\n"
 "layout (location = 0) in vec3 color;\n"
 "layout (location = 0) out vec4 frag_color;\n"
@@ -19,10 +20,28 @@ const char * frag_source =
 "  frag_color = vec4(color, 1.0);\n"
 "}\n";
 
-const char * app_name = "Breakout";
+const char* app_name = "Breakout";
 
 using namespace Atlas;
 
+int main() {
+    Backend::Instance instance(app_name, VK_MAKE_VERSION(0,0,1));
+    if (!instance.init()) return 1;
+
+    Backend::Device device(instance);
+    if (!device.init()) return 1;
+
+    Window window(device, app_name, 1280, 720);
+    if (!window.init()) return 1;
+
+    while (!window.should_close()) {
+        window.handle_events();
+    }
+
+    return 0;
+}
+
+/*
 struct App {
     std::chrono::high_resolution_clock::time_point last_frame_time;
     std::chrono::high_resolution_clock::time_point curr_frame_time;
@@ -77,4 +96,4 @@ int main() {
     shutdown(app);
 
     return 0;
-}
+}*/

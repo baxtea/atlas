@@ -225,22 +225,27 @@ void Window::shutdown_win32() {
 #endif // _WIN32
 
 
-Window::Window(const std::string& name, uint32_t width, uint32_t height)
-    : m_name(name), m_width(width), m_height(height), m_should_close(false) {
-
-#   ifdef _WIN32
-        win32 = static_cast<win32_info*>(malloc(sizeof(win32_info)));
-        init_win32();
-#   else
-        xcb = static_cast<xcb_info*>(malloc(sizeof(xcb_info)));
-        init_xcb();
-#   endif
-
-    init_swapchain();
-    init_framebuffers();
+Window::Window(const Backend::Device& device, const std::string& name, uint32_t width, uint32_t height)
+    : m_name(name), m_width(width), m_height(height), m_fullscreen(false)
+    , m_should_close(false), m_image_is_old(false), n_swapchain_images(3)
+    , m_device(device), m_present_surface(VK_NULL_HANDLE), m_swapchain(VK_NULL_HANDLE)
+{
+    vkDestroySurfaceKHR = reinterpret_cast<PFN_vkDestroySurfaceKHR>( vkGetInstanceProcAddr(device.vk_instance(), "vkDestroySurfaceKHR") );
+    vkGetPhysicalDeviceSurfaceSupportKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceSupportKHR>( vkGetInstanceProcAddr(device.vk_instance(), "vkGetPhysicalDeviceSurfaceSupportKHR") );
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>( vkGetInstanceProcAddr(device.vk_instance(), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR") );
+    vkGetPhysicalDeviceSurfaceFormatsKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceFormatsKHR>( vkGetInstanceProcAddr(device.vk_instance(), "vkGetPhysicalDeviceSurfaceFormatsKHR") );
+    vkGetPhysicalDeviceSurfacePresentModesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfacePresentModesKHR>( vkGetInstanceProcAddr(device.vk_instance(), "vkGetPhysicalDeviceSurfacePresentModesKHR") );
+#ifdef _WIN32
+    vkCreateWin32SurfaceKHR = reinterpret_cast<PFN_vkCreateWin32SurfaceKHR>( vkGetInstanceProcAddr(device.vk_instance(), "vkCreateWin32SurfaceKHR") );
+#else
+    vkCreateXcbSurfaceKHR = reinterpret_cast<PFN_vkCreateXcbSurfaceKHR>( vkGetInstanceProcAddr(device.vk_instance(), "vkCreateXcbSurfaceKHR") );
+#endif
 }
 
 Window::~Window() {
+    if (m_present_surface)
+        vkDestroySurfaceKHR(m_device.vk_instance(), m_present_surface, nullptr);
+
 #   ifdef _WIN32
         shutdown_win32();
         free(win32);
@@ -248,6 +253,69 @@ Window::~Window() {
         shutdown_xcb();
         free(xcb);
 #   endif
+}
+
+bool Window::init_surface() {
+#ifdef _WIN32
+    VkWin32SurfaceCreateInfoKHR surface_info = {
+        VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,    // sType
+        nullptr,                                            // pNext
+        0,                                                  // flags
+        win32->inst,                                        // hinstance
+        win32->hwnd                                         // hwnd
+    };
+    vkCreateWin32SurfaceKHR(m_device.vk_instance(), &surface_info, nullptr, &m_present_surface);
+
+#else
+    VkXcbSurfaceCreateInfoKHR surface_info = {
+        VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR,  // sType
+        nullptr,                                        // pNext
+        0,                                              // flags
+        xcb->connection,                                // connection
+        xcb->window                                     // window
+    };
+    vkCreateXcbSurfaceKHR(m_device.vk_instance(), &surface_info, nullptr, &m_present_surface);
+#endif
+
+    VkPhysicalDevice phys = m_device.get_physical_device().device;
+
+    // Query physical device surface capabilities
+    VkResult res = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, m_present_surface, &m_surface_caps);
+    if (!validate(res)) return false;
+
+    uint32_t n_surface_formats;
+    res = vkGetPhysicalDeviceSurfaceFormatsKHR(phys, m_present_surface, &n_surface_formats, NULL);
+    if (!validate(res)) return false;
+    m_surface_formats.resize(n_surface_formats);
+    res = vkGetPhysicalDeviceSurfaceFormatsKHR(phys, m_present_surface, &n_surface_formats, m_surface_formats.data());
+    if (!validate(res)) return false;
+    
+    uint32_t n_present_modes;
+    res = vkGetPhysicalDeviceSurfacePresentModesKHR(phys, m_present_surface, &n_present_modes, NULL);
+    if (!validate(res)) return false;
+    m_present_modes.resize(n_present_modes);
+    res = vkGetPhysicalDeviceSurfacePresentModesKHR(phys, m_present_surface, &n_present_modes, m_present_modes.data());
+    if (!validate(res)) return false;
+
+    return true;
+}
+
+bool Window::init_swapchain() {
+    // TODO: implement
+
+
+    return true;
+}
+
+bool Window::init() {
+#   ifdef _WIN32
+        win32 = static_cast<win32_info*>(malloc(sizeof(win32_info)));
+        return init_win32() && init_surface() && init_swapchain();
+#   else
+        xcb = static_cast<xcb_info*>(malloc(sizeof(xcb_info)));
+        return init_xcb() && init_surface() && init_swapchain();
+#   endif
+    //init_framebuffers(); ??
 }
 
 /*
