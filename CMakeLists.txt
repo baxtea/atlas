@@ -1,50 +1,57 @@
-cmake_minimum_required(VERSION 3.0.0)
-project(atlas VERSION 0.0.0)
+cmake_minimum_required(VERSION 3.7.0)
+project(atlas)
 
 include(CTest)
 enable_testing()
 
-add_subdirectory("deps/Anvil")
+find_package(Vulkan)
+if(Vulkan_FOUND)
+    include_directories(${Vulkan_INCLUDE_DIR})
+    message("Using Vulkan at " ${Vulkan_INCLUDE_DIR} ", " ${Vulkan_LIBRARY})
+else()
+    message(FATAL_ERROR "Couldn't find Vulkan")
+endif()
 
-include_directories("deps/Anvil/deps"
-                    "deps/Anvil/include"
-                    "deps/VulkanMemoryAllocator/src"
+include_directories(${Vulkan_INCLUDE_DIR}
                     "deps/glm"
-                    "include")
+                    "include"
+                    "deps/VulkanMemoryAllocator/src")
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../bin)
 
-set(ATLAS_SRC_LIST  "include/atlas.h"
-                    "include/mesh.h"
+set(ATLAS_SRC_LIST  "include/mesh.h"
                     "include/camera.h"
                     "include/my_math.h"
                     "include/window.h"
+                    "include/backend.h"
                     
-                    "src/atlas.cpp"
                     "src/mesh.cpp"
                     "src/camera.cpp"
                     "src/my_math.cpp"
-                    "src/window.cpp")
+                    "src/window.cpp"
+                    "src/backend.cpp")
 
-# TODO: Change window implementation options
-add_definitions(-DATLAS_WINDOW_IMPL_XCB=1)
 add_library(atlas ${ATLAS_SRC_LIST})
 
+target_compile_definitions(atlas PUBLIC
+    ATLAS_VERSION_MAJOR=0
+    ATLAS_VERSION_MINOR=0
+    ATLAS_VERSION_PATCH=1)
+    
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  # Enable vulkan layers
-  target_compile_definitions(atlas ENABLE_VALIDATION=1)
+  target_compile_definitions(atlas PUBLIC
+  # Enable vulkan layers. 2 for verbose
+  ENABLE_VALIDATION=2
   # Fix glm::perspective to work with Vulkan's coordinate system
-  target_compile_definitions(atlas GLM_FORCE_DEPTH_ZERO_TO_ONE=1)
+  GLM_FORCE_DEPTH_ZERO_TO_ONE=1)
 endif()
 
-add_dependencies(atlas Anvil)
 if (WIN32)
-    target_link_libraries(atlas Anvil)
+    target_link_libraries(atlas ${Vulkan_LIBRARY})
 else()
-    # TODO: Optional link with xcb
-    target_link_libraries(atlas Anvil dl xcb)
+    target_link_libraries(atlas ${Vulkan_LIBRARY} dl xcb)
 endif()
 
 if (CMAKE_GENERATOR STREQUAL "Visual Studio 6")
@@ -58,15 +65,15 @@ elseif(CMAKE_GENERATOR STREQUAL "Visual Studio 12 2013")
     message(SEND_ERROR, "Insufficient <chrono> specification. Please use VS2015 and up.")
 endif()
 
-add_executable(call_lib demos/call_lib.cpp)
-target_link_libraries(call_lib atlas vulkan)
+#add_executable(call_lib demos/call_lib.cpp)
+#target_link_libraries(call_lib atlas)
 
 add_executable(breakout demos/breakout.cpp)
-target_link_libraries(breakout atlas vulkan)
+target_link_libraries(breakout atlas)
 
-add_executable(start_vulkan demos/stolen_anvil_demo.cpp)
-add_dependencies(start_vulkan atlas)
-target_link_libraries(start_vulkan atlas)
+#add_executable(start_vulkan demos/stolen_anvil_demo.cpp)
+#add_dependencies(start_vulkan atlas)
+#target_link_libraries(start_vulkan atlas)
 
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})

@@ -1,11 +1,10 @@
 #include "mesh.h"
-#include "atlas.h"
-#include "wrappers/buffer.h"
+//#include "atlas.h"
 #include "glm/glm.hpp"
 #include <array>
 
 using namespace Atlas;
-
+/*
 std::shared_ptr<StaticMesh> create_from_data() {
 
 }
@@ -65,3 +64,4 @@ std::shared_ptr<StaticMesh> StaticMesh::create_primitive::box(float width, float
     
     return mesh;
 }
+*/

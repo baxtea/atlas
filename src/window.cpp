@@ -1,16 +1,9 @@
 #include "window.h"
-#include "wrappers/rendering_surface.h"
-#include "wrappers/swapchain.h"
-#include <cassert>
+#include <assert.h>
 #include <stdio.h>
+#include <cstring>
 
 using namespace Atlas;
-
-namespace Atlas {
-    extern std::shared_ptr<Anvil::Instance> g_instance;
-    extern std::weak_ptr<Anvil::PhysicalDevice> g_physical_device;
-    extern std::weak_ptr<Anvil::SGPUDevice> g_device;
-}
 
 //
 // XCB implementation
@@ -92,6 +85,8 @@ bool Window::init_xcb() {
         fprintf(stderr, "[!] Error while flushing xcb stream!\n");
         return false;
     }
+
+    return true;
 }
 
 void Window::handle_xcb_events() {
@@ -138,12 +133,30 @@ void Window::shutdown_xcb() {
 
 struct Window::win32_info {
     HINSTANCE inst;
-    HWND wnd;
+    HWND window;
     MSG msg;
 };
 
 
-LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM) {
+LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (message) {
+    case WM_CLOSE:
+        LONG_PTR lpUserData = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+        Atlas::Window* window = reinterpret_cast<Atlas::Window*>(lpUserData);
+        if (window)
+            window->m_should_close = true;
+
+        break;
+    case WM_DESTROY:
+        DestroyWindow(hWnd);
+        PostQuitMessage(0);
+        break;
+    case WM_PAINT:
+        ValidateRect(hWnd, NULL);
+        break;
+    default:
+        return DefWindowProc(hWnd, message, wParam, lParam);
+    }
 }
 
 bool Window::init_win32() {
@@ -159,16 +172,19 @@ bool Window::init_win32() {
     wc.cbClsExtra       = 0;
     wc.cbWndExtra       = 0;
     wc.hInstance        = win32->inst;
-    wc.hIcon            = LoadIcon(NULL, IDI_WINLOGO);
+    wc.hIcon            = LoadIcon(NULL, MAKEINTRESOURCE(IDI_APPLICATION));
     wc.hCursor          = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground    = (HBRUSH)(COLOR_WINDOW+1);
+    wc.hbrBackground    = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.lpszMenuName     = m_name.c_str();
-    wc.hIconSm          = LoadIcon(NULL, IDI_WINLOGO);
+    wc.hIconSm          = LoadIcon(NULL, MAKEINTRESOURCE(IDI_APPLICATION));
 
-    RegisterClassEx(&wc);
+    if (!RegisterClassEx(&wc)) {
+        fprintf(stderr, "[!] Failed to register WNDCLASSEX!\n");
+        return false;
+    }
 
 
-    win32->wnd = CreateWindowEx(
+    win32->window = CreateWindowEx(
                 WS_EX_APPWINDOW,        // Extended style
                 m_name.c_str(),         // Class name
                 m_name.c_str(),         // Window title
@@ -181,7 +197,14 @@ bool Window::init_win32() {
                 NULL,                   // No menu
                 win32->inst,            // Instance
                 NULL);                  // Don't pass anything to WM_CREATE
+    
+    if (!win32->window) {
+        fprintf(stderr, "[!] Failed to create window!\n");
+        return false;
+    }
 
+    SetWindowLongPtr(win32->window, GWLP_USERDATA, this);
+    return true;
 }
 
 void Window::handle_win32_events() {
@@ -195,7 +218,8 @@ void Window::handle_win32_events() {
 }
 
 void Window::shutdown_win32() {
-
+    DestroyWindow(win32->window);
+    UnregisterClassEx(m_name.c_str(), win32->inst);
 }
 
 #endif // _WIN32
@@ -213,6 +237,7 @@ Window::Window(const std::string& name, uint32_t width, uint32_t height)
 #   endif
 
     init_swapchain();
+    init_framebuffers();
 }
 
 Window::~Window() {
@@ -225,6 +250,7 @@ Window::~Window() {
 #   endif
 }
 
+/*
 #include "misc/window.h"
 void do_nothing(void*) {};
 struct AnvilClone : public Anvil::Window {
@@ -259,10 +285,10 @@ struct AnvilClone : public Anvil::Window {
     }
 };
 
-bool Window::init_swapchain() {
+void Window::init_swapchain() {
     AnvilClone* clone = new AnvilClone(m_name, m_width, m_height);
 #ifdef _WIN32
-    clone->set_handle(win32->hwnd);
+    clone->set_handle(win32->window);
 #else
     clone->set_handle(xcb->window);
 #endif
@@ -287,7 +313,7 @@ bool Window::init_swapchain() {
 
     m_swapchain->set_name((m_name + " swapchain").c_str());
 
-    /* Cache the queue we are going to use for presentation */
+    // Cache the queue we are going to use for presentation
     const std::vector<uint32_t>* present_queue_fams_ptr = nullptr;
 
     if (!m_rendering_surface->get_queue_families_with_present_support(device_locked_ptr->get_physical_device(),
@@ -297,12 +323,29 @@ bool Window::init_swapchain() {
     }
 
     m_present_queue = device_locked_ptr->get_queue(present_queue_fams_ptr->at(0),
-                                                       0); /* in_n_queue */
+                                                       0); // in_n_queue 
 }
 
-bool Window::should_close() const {
-    return m_should_close;
-}
+void Window::init_framebuffers() {
+    bool result;
+
+    for (uint32_t n_swapchain_image = 0;
+                  n_swapchain_image < m_n_swapchain_images;
+                ++n_swapchain_image)
+    {
+        m_framebuffers[n_swapchain_image] = Anvil::Framebuffer::create(
+            g_device,
+            m_width, m_height,
+            1); // n_layers
+
+        m_framebuffers[n_swapchain_image]->set_name_formatted("Framebuffer used to render to swapchain image [%d]",
+            n_swapchain_image);
+
+        result = m_framebuffers[n_swapchain_image]->add_attachment(m_swapchain->get_image_view(n_swapchain_image),
+            nullptr); // out_opt_attachment_id_ptrs
+        anvil_assert(result);
+    }
+}*/
 
 void Window::handle_events() {
 #if _WIN32
