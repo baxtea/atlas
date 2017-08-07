@@ -7,10 +7,21 @@
 // GPUOpen memory allocator
 #define VMA_STATS_STRING_ENABLED 0
 #include <string.h>
+
+// explodes if `min` and `max` are existing macros -- which they are in Windows
+#undef min
+#undef max
 #include "vk_mem_alloc.h"
 
+
 namespace Atlas {
+    enum ValidationLevel {
+        VALIDATION_DISABLED = 0,
+        VALIDATION_ENABLED,
+        VALIDATION_VERBOSE
+    };
     bool validate(VkResult result);
+    
     namespace Backend {
         void log(const std::string& message);
         void warning(const std::string& message);
@@ -50,11 +61,10 @@ namespace Atlas {
 
         struct Instance {
             // Sets data; does not create the instance
-            Instance(const std::string& app_name, uint32_t app_version = VK_MAKE_VERSION(0,0,0));
+            Instance(const std::string& app_name, uint32_t app_version, ValidationLevel validation);
             ~Instance();
             bool init();
 
-            VkApplicationInfo app_info;
             VkInstanceCreateFlags instance_flags;
             // If any extensions here are not global, the layer which provides them
             // will be automatically be loaded, if it exists
@@ -64,7 +74,7 @@ namespace Atlas {
                 return m_instance;
             }
             inline uint32_t get_n_physical_devices() const {
-                return m_physical_devices.size();
+                return static_cast<uint32_t>(m_physical_devices.size());
             }
             uint32_t get_preferred_device_index() const;
             inline const PhysicalDevice& get_physical_device(uint32_t index) const {
@@ -76,7 +86,11 @@ namespace Atlas {
             void load_func_pointers();
             static VkBool32 default_dbg_callback(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT objType, uint64_t srcObject, size_t location, int32_t msgCode, const char* pLayerPrefix, const char* pMsg, void* pUserData);
         protected:
-            friend class Device;
+            friend struct Device;
+
+            std::string m_app_name;
+            uint32_t m_app_version;
+            ValidationLevel m_validation;
 
             PFN_vkCreateDebugReportCallbackEXT vkCreateDebugReportCallbackEXT;
             PFN_vkDebugReportMessageEXT vkDebugReportMessageEXT;

@@ -1,4 +1,5 @@
 #define VMA_IMPLEMENTATION
+#include <algorithm>
 #include "backend.h"
 #include <algorithm>
 #include <stdio.h>
@@ -153,23 +154,10 @@ VkBool32 Instance::default_dbg_callback(VkDebugReportFlagsEXT flags, VkDebugRepo
     return VK_FALSE;
 }
 
-Instance::Instance(const std::string& app_name, uint32_t app_version)
-    : m_dbg_callback(VK_NULL_HANDLE), m_instance(VK_NULL_HANDLE), instance_flags(0)
+Instance::Instance(const std::string& app_name, uint32_t app_version, ValidationLevel validation_level)
+    : m_dbg_callback(VK_NULL_HANDLE), m_instance(VK_NULL_HANDLE), instance_flags(0), m_validation(validation_level)
+    , m_app_name(app_name), m_app_version(app_version)
 {
-    // Store application info
-    app_info = {
-        VK_STRUCTURE_TYPE_APPLICATION_INFO, // sType
-        nullptr,                            // pNext
-        app_name.c_str(),                   // pApplicationName
-        app_version,                        // applicationVersion
-        "Atlas",                            // pEngineName
-        VK_MAKE_VERSION(                    // engineVersion
-            ATLAS_VERSION_MAJOR,
-            ATLAS_VERSION_MINOR,
-            ATLAS_VERSION_PATCH),
-        VK_MAKE_VERSION(1,0,57)              // apiVersion
-    };
-
     // Enumerate layers
     uint32_t n_supported_layers;
     VkResult res = vkEnumerateInstanceLayerProperties(&n_supported_layers, NULL);
@@ -206,9 +194,6 @@ Instance::Instance(const std::string& app_name, uint32_t app_version)
 
     // (3) Provide default extensions
     enabled_extensions = {
-#if ENABLE_VALIDATION
-        VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
-#endif
 #if _WIN32
         VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
 #else
@@ -216,6 +201,8 @@ Instance::Instance(const std::string& app_name, uint32_t app_version)
 #endif
         VK_KHR_SURFACE_EXTENSION_NAME
     };
+    if (m_validation)
+        enabled_extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
 
     if (is_extension_supported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
         enabled_extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
@@ -241,6 +228,20 @@ bool Instance::init() {
         }
     }
 
+    // Define application info
+    VkApplicationInfo app_info = {
+        VK_STRUCTURE_TYPE_APPLICATION_INFO, // sType
+        nullptr,                            // pNext
+        m_app_name.c_str(),                 // pApplicationName
+        m_app_version,                      // applicationVersion
+        "Atlas",                            // pEngineName
+        VK_MAKE_VERSION(                    // engineVersion
+            ATLAS_VERSION_MAJOR,
+            ATLAS_VERSION_MINOR,
+            ATLAS_VERSION_PATCH),
+        VK_MAKE_VERSION(1,0,57)              // apiVersion
+    };
+
     // Create instance
     VkInstanceCreateInfo instance_info = {
         VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, // sType
@@ -259,24 +260,23 @@ bool Instance::init() {
 
     load_func_pointers();
 
-#ifdef ENABLE_VALIDATION
-    VkDebugReportCallbackCreateInfoEXT callback_info = {
-        VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,    // sType
-        nullptr,                                                    // pNext
-#if ENABLE_VALIDATION == 2
-        VK_DEBUG_REPORT_DEBUG_BIT_EXT |
-        VK_DEBUG_REPORT_INFORMATION_BIT_EXT |
-#endif
-        VK_DEBUG_REPORT_ERROR_BIT_EXT |
-        VK_DEBUG_REPORT_WARNING_BIT_EXT |
-        VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT,                // flags
-        default_dbg_callback,                                       // pfnCallback
-        this                                                        // pUserData
-    };
+    if (m_validation) {
+        VkDebugReportCallbackCreateInfoEXT callback_info = {
+            VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,    // sType
+            nullptr,                                                    // pNext
+            VK_DEBUG_REPORT_ERROR_BIT_EXT |
+            VK_DEBUG_REPORT_WARNING_BIT_EXT |
+            VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT,                // flags
+            default_dbg_callback,                                       // pfnCallback
+            this                                                        // pUserData
+        };
+        if (m_validation == VALIDATION_VERBOSE) {
+            callback_info.flags |= (VK_DEBUG_REPORT_DEBUG_BIT_EXT | VK_DEBUG_REPORT_INFORMATION_BIT_EXT);
+        }
 
-    res = vkCreateDebugReportCallbackEXT(m_instance, &callback_info, NULL, &m_dbg_callback);
-    if (!validate(res)) return false;
-#endif
+        res = vkCreateDebugReportCallbackEXT(m_instance, &callback_info, NULL, &m_dbg_callback);
+        if (!validate(res)) return false;
+    }
 
     // Enumerate physical devices
     uint32_t n_physical_devices = 0;
@@ -598,9 +598,9 @@ bool Device::init() {
 }
 
 Device::~Device() {
-    for (auto& pool : m_command_pools) {
-        if (pool)
-            vkDestroyCommandPool(m_device, pool, NULL);
+    for (auto iter = m_command_pools.rbegin(); iter != m_command_pools.rend(); ++iter) {
+        if (*iter)
+            vkDestroyCommandPool(m_device, *iter, NULL);
     }
     if (m_allocator)
         vmaDestroyAllocator(m_allocator);

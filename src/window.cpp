@@ -136,18 +136,21 @@ void Window::shutdown_xcb() {
 
 struct Window::win32_info {
     HINSTANCE inst;
-    HWND window;
+    HWND hwnd;
     MSG msg;
 };
 
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    switch (message) {
+    LONG_PTR lpUserData;
+    Atlas::Window* window;
+
+    switch (msg) {
     case WM_CLOSE:
-        LONG_PTR lpUserData = GetWindowLongPtr(hWnd, GWLP_USERDATA);
-        Atlas::Window* window = reinterpret_cast<Atlas::Window*>(lpUserData);
+        lpUserData = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+        window = reinterpret_cast<Atlas::Window*>(lpUserData);
         if (window)
-            window->m_should_close = true;
+            window->set_should_close(true);
 
         break;
     case WM_DESTROY:
@@ -158,8 +161,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         ValidateRect(hWnd, NULL);
         break;
     default:
-        return DefWindowProc(hWnd, message, wParam, lParam);
+        return DefWindowProc(hWnd, msg, wParam, lParam);
     }
+    return 0;
 }
 
 bool Window::init_win32() {
@@ -175,19 +179,20 @@ bool Window::init_win32() {
     wc.cbClsExtra       = 0;
     wc.cbWndExtra       = 0;
     wc.hInstance        = win32->inst;
-    wc.hIcon            = LoadIcon(NULL, MAKEINTRESOURCE(IDI_APPLICATION));
+    wc.hIcon            = (HICON)LoadIcon(NULL, MAKEINTRESOURCE(IDI_APPLICATION));
     wc.hCursor          = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground    = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.lpszMenuName     = m_name.c_str();
-    wc.hIconSm          = LoadIcon(NULL, MAKEINTRESOURCE(IDI_APPLICATION));
+    wc.lpszClassName    = m_name.c_str();
+    wc.hIconSm          = (HICON)LoadIcon(NULL, MAKEINTRESOURCE(IDI_APPLICATION));
 
     if (!RegisterClassEx(&wc)) {
-        fprintf(stderr, "[!] Failed to register WNDCLASSEX!\n");
+        fprintf(stderr, "[!] Failed to register WNDCLASSEX! Error code %d\n", GetLastError());
         return false;
     }
 
 
-    win32->window = CreateWindowEx(
+    win32->hwnd = CreateWindowEx(
                 WS_EX_APPWINDOW,        // Extended style
                 m_name.c_str(),         // Class name
                 m_name.c_str(),         // Window title
@@ -201,18 +206,20 @@ bool Window::init_win32() {
                 win32->inst,            // Instance
                 NULL);                  // Don't pass anything to WM_CREATE
     
-    if (!win32->window) {
+    if (!win32->hwnd) {
         fprintf(stderr, "[!] Failed to create window!\n");
         return false;
     }
 
-    SetWindowLongPtr(win32->window, GWLP_USERDATA, this);
+    SetWindowLongPtr(win32->hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+
+    ShowWindow(win32->hwnd, SW_SHOW);
     return true;
 }
 
 void Window::handle_win32_events() {
     while (PeekMessage(&win32->msg, NULL, 0, 0, PM_REMOVE)) {
-        if (win32->msg == WM_QUIT)
+        if (win32->msg.message == WM_QUIT)
             m_should_close = true;
         
         TranslateMessage(&win32->msg);
@@ -221,10 +228,10 @@ void Window::handle_win32_events() {
 }
 
 void Window::shutdown_win32() {
-    if (win32->window);
-        DestroyWindow(win32->window);
+    if (win32->hwnd)
+        DestroyWindow(win32->hwnd);
 
-    UnregisterClassEx(m_name.c_str(), win32->inst);
+    UnregisterClass(m_name.c_str(), win32->inst);
 }
 
 #endif // _WIN32

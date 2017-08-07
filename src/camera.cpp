@@ -3,12 +3,10 @@
 #include "my_math.h"
 #include <iostream>
 #include <array>
-#define _USE_MATH_DEFINES
+#define _USE_MATH_DEFINES // Tells <math.h> to define M_PI and whatnot
 #include <math.h>
-#undef _USE_MATH_DEFINES
 
 using namespace Atlas;
-
 
 constexpr glm::vec3 UNIT_X(1, 0, 0);
 constexpr glm::vec3 UNIT_Y(0, 1, 0);

@@ -59,9 +59,8 @@ namespace Atlas {
         VkImage get_current_image();
 
     protected:
-        friend class Backend::Device;
+        friend struct Backend::Device;
 #ifdef _WIN32
-        friend LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
         bool init_win32();
         void handle_win32_events();
         void shutdown_win32();

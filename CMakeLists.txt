@@ -38,15 +38,9 @@ add_library(atlas ${ATLAS_SRC_LIST})
 target_compile_definitions(atlas PUBLIC
     ATLAS_VERSION_MAJOR=0
     ATLAS_VERSION_MINOR=0
-    ATLAS_VERSION_PATCH=1)
-    
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  target_compile_definitions(atlas PUBLIC
-  # Enable vulkan layers. 2 for verbose
-  ENABLE_VALIDATION=2
-  # Fix glm::perspective to work with Vulkan's coordinate system
-  GLM_FORCE_DEPTH_ZERO_TO_ONE=1)
-endif()
+    ATLAS_VERSION_PATCH=1
+    # Fix glm::perspective to work with Vulkan's coordinate system
+    GLM_FORCE_DEPTH_ZERO_TO_ONE=1)
 
 if (WIN32)
     target_link_libraries(atlas ${Vulkan_LIBRARY})

@@ -1,7 +1,12 @@
 #include "my_math.h"
 #include <math.h>
 
+#if (GLM_COMPILER & GLM_COMPILER_VC15) && (_MSC_VER < 1910)
+#error vc15
+#endif
+
 using namespace Atlas;
+        constexpr glm::vec3 VEC3_0(0,0,0);
 
 glm::quat Math::get_rotation_to(const glm::vec3& u, const glm::vec3& v, const glm::vec3& fallback_axis) {
     // From Sam Hocevar's article Quaternion from two vectors: the final version'
@@ -18,7 +23,6 @@ glm::quat Math::get_rotation_to(const glm::vec3& u, const glm::vec3& v, const gl
          * around an arbitrary orthogonal axis. Axis normalisation
          * can happen later, when we normalise the quaternion.
          */
-        constexpr glm::vec3 VEC3_0 = glm::vec3(0,0,0);
         real_part = 0.0f;
         axis = (fallback_axis != VEC3_0) ? fallback_axis
              : ( abs(u.x) > abs(u.z) ? glm::vec3(-u.y, u.x, 0.0f)

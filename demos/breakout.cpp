@@ -25,7 +25,7 @@ const char* app_name = "Breakout";
 using namespace Atlas;
 
 int main() {
-    Backend::Instance instance(app_name, VK_MAKE_VERSION(0,0,1));
+    Backend::Instance instance(app_name, VK_MAKE_VERSION(0,0,1), VALIDATION_VERBOSE);
     if (!instance.init()) return 1;
 
     Window window(instance, app_name, 1280, 720);
