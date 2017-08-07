@@ -1,14 +1,7 @@
 #ifndef ATLAS_BACKEND_H
 #define ATLAS_BACKEND_H
 
-#ifdef _WIN32
-#define VK_USE_PLATFORM_WIN32_KHR
-#else
-#define VK_USE_PLATFORM_XCB_KHR
-#endif
-
-#include <vulkan/vulkan.h>
-#include <vector>
+#include "window.h"
 #include <unordered_map>
 #include <unordered_set>
 // GPUOpen memory allocator
@@ -19,9 +12,9 @@
 namespace Atlas {
     bool validate(VkResult result);
     namespace Backend {
-        static void log(const std::string& message);
-        static void warning(const std::string& message);
-        static void error(const std::string& message);
+        void log(const std::string& message);
+        void warning(const std::string& message);
+        void error(const std::string& message);
 
         enum VendorID {
             VK_VENDOR_ID_AMD = 0x1002,
@@ -34,8 +27,8 @@ namespace Atlas {
 
         enum QueueFamily {
             QUEUE_FAMILY_UNIVERSAL = 0,
-            QUEUE_FAMILY_COMPUTE,
             QUEUE_FAMILY_TRANSFER,
+            QUEUE_FAMILY_COMPUTE,
             QUEUE_FAMILY_COUNT,
             QUEUE_FAMILY_FIRST = QUEUE_FAMILY_UNIVERSAL
         };
@@ -47,10 +40,10 @@ namespace Atlas {
 
             struct {
                 union {
-                    struct { uint32_t universal, transfer, compute; };
-                    uint32_t indices[QUEUE_FAMILY_COUNT];
+                    struct { uint32_t universal, compute, transfer; };
+                    uint32_t index_of[QUEUE_FAMILY_COUNT];
                 };
-                uint32_t universal_count, transfer_count, compute_count;
+                uint32_t universal_count, compute_count, transfer_count;
             } queue_families;
             std::unordered_set<std::string> supported_extensions;
         };
@@ -108,8 +101,7 @@ namespace Atlas {
 
         struct Device {
             // TODO: use VK_KHX_device_group_creation for multi-GPU?
-            Device(const Backend::Instance& source);
-            Device(const Backend::Instance& source, uint32_t physical_device_index);
+            Device(Window& window);
             ~Device();
             bool init();
 
@@ -132,12 +124,9 @@ namespace Atlas {
             inline VkDevice vk() const {
                 return m_device;
             }
-            inline VkInstance vk_instance() const {
-                return m_instance;
-            }
         protected:
             std::unordered_set<std::string> m_supported_extensions;
-            VkInstance m_instance;
+            Atlas::Window& m_window;
             const PhysicalDevice& m_physical_device;
             const std::vector<const char*>& m_enabled_layers;
             VkDevice m_device;
@@ -152,6 +141,7 @@ namespace Atlas {
             static constexpr uint32_t compute_is_dedicated = 1 << 1;
             static constexpr uint32_t transfer_owns_self = 1 << 2;
             static constexpr uint32_t transfer_is_dedicated = 1 << 3;
+            static constexpr uint32_t present_is_dedicated = 1 << 4;
             uint32_t m_queue_flags;
         };
 

@@ -1,18 +1,23 @@
 #ifndef ATLAS_WINDOW_H
 #define ATLAS_WINDOW_H
 
-#include <stdint.h>
+#include <vector>
+#include <unordered_set>
 #include <string>
 #include <memory>
-#include "backend.h"
+#include <stdint.h>
+
+#ifdef _WIN32
+#define VK_USE_PLATFORM_WIN32_KHR
+#else
+#define VK_USE_PLATFORM_XCB_KHR
+#endif
+#include <vulkan/vulkan.h>
 
 namespace Atlas {
-    class Device;
-
     namespace Backend {
-        struct Swapchain {
-            Swapchain(const Device& device);
-        };
+        struct Instance;
+        struct Device;
     }
 
     struct Window {
@@ -21,9 +26,11 @@ namespace Atlas {
         // TODO: expand
         //
 
-        Window(const Backend::Device& device, const std::string& name, uint32_t width, uint32_t height);
+        Window(const Backend::Instance& instance, const std::string& name, uint32_t width, uint32_t height);
+        Window(const Backend::Instance& instance, uint32_t physical_device_index, const std::string& name, uint32_t width, uint32_t height);
         ~Window();
         bool init();
+        void close();
 
         void set_fullscreen(bool full);
         inline bool is_fullscreen() const {
@@ -33,6 +40,9 @@ namespace Atlas {
         void handle_events();
         inline bool should_close() const {
             return m_should_close;
+        }
+        inline void set_should_close(bool request_close) {
+            m_should_close = request_close;
         }
 
         //
@@ -49,6 +59,7 @@ namespace Atlas {
         VkImage get_current_image();
 
     protected:
+        friend class Backend::Device;
 #ifdef _WIN32
         friend LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
         bool init_win32();
@@ -60,8 +71,8 @@ namespace Atlas {
         void shutdown_xcb();
 #endif
         bool init_surface();
-        bool init_swapchain();
-        bool init_framebuffers();
+        bool init_swapchain(VkDevice device);
+        bool init_framebuffers(VkDevice device);
 
         const std::string m_name;
         uint32_t m_width, m_height;
@@ -75,17 +86,22 @@ namespace Atlas {
         };
 
         // Defaults to triple buffered (3 images)
-        uint32_t n_swapchain_images;
+        uint32_t m_n_swapchain_images;
         VkSurfaceCapabilitiesKHR m_surface_caps;
         std::vector<VkSurfaceFormatKHR> m_surface_formats;
         std::vector<VkPresentModeKHR> m_present_modes;
-        const Backend::Device& m_device;
-        VkSurfaceKHR m_present_surface;
+
+        uint32_t m_physical_device_index;
+        std::unordered_set<uint32_t> m_present_capable_families;
+        const Backend::Instance& m_instance;
+        VkQueue m_present_queue;
+        VkSurfaceKHR m_surface;
         VkSwapchainKHR m_swapchain;
         VkImage m_current_image;
         std::vector<VkFramebuffer> m_fbos;
 
 
+        // Surface functions
         PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
         PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR;
         PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
@@ -96,6 +112,13 @@ namespace Atlas {
 #else
         PFN_vkCreateXcbSurfaceKHR vkCreateXcbSurfaceKHR;
 #endif
+
+        // Swapchain functions
+        PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR;
+        PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
+        PFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR;
+        PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
+        PFN_vkQueuePresentKHR vkQueuePresentKHR;
 
         
         /*

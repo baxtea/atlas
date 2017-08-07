@@ -28,16 +28,17 @@ int main() {
     Backend::Instance instance(app_name, VK_MAKE_VERSION(0,0,1));
     if (!instance.init()) return 1;
 
-    Backend::Device device(instance);
-    if (!device.init()) return 1;
-
-    Window window(device, app_name, 1280, 720);
+    Window window(instance, app_name, 1280, 720);
     if (!window.init()) return 1;
+
+    Backend::Device device(window);
+    if (!device.init()) return 1;
 
     while (!window.should_close()) {
         window.handle_events();
     }
 
+    // Window closes automatically on exit
     return 0;
 }
 

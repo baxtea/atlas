@@ -311,12 +311,12 @@ bool Instance::init() {
                 details.queue_families.compute_count = queues[index].queueCount;
                 continue;
             }
-            if ( (queues[index].queueFlags & VK_QUEUE_GRAPHICS_BIT) && (index != details.queue_families.compute) ) {
+            else if ( (queues[index].queueFlags & VK_QUEUE_GRAPHICS_BIT) && (index != details.queue_families.compute) ) {
                 details.queue_families.universal = index;
                 details.queue_families.universal_count = queues[index].queueCount;
                 continue;
             }
-            if ( (queues[index].queueFlags & VK_QUEUE_TRANSFER_BIT)
+            else if ( (queues[index].queueFlags & VK_QUEUE_TRANSFER_BIT)
             && (index != details.queue_families.compute)
             && (index != details.queue_families.universal) ) {
                 details.queue_families.transfer = index;
@@ -387,13 +387,9 @@ bool Instance::is_extension_supported(const std::string& name) const {
 //          //
 //////////////
 
-
-Device::Device(const Instance& source) : Device(source, source.get_preferred_device_index()) {
-}
-
-Device::Device(const Instance& source, uint32_t physical_device_index)
-    : m_instance(source.vk()), m_enabled_layers(source.m_enabled_layers)
-    , m_physical_device(source.get_physical_device(physical_device_index))
+Device::Device(Window& window)
+    : m_window(window), m_enabled_layers(window.m_instance.m_enabled_layers)
+    , m_physical_device(window.m_instance.get_physical_device(window.m_physical_device_index))
     , m_device(VK_NULL_HANDLE), m_universal_queue(VK_NULL_HANDLE)
     , m_compute_queue(VK_NULL_HANDLE), m_transfer_queue(VK_NULL_HANDLE)
     , m_queue_flags(0), m_allocator(VK_NULL_HANDLE)
@@ -438,9 +434,28 @@ bool Device::init() {
         &default_queue_priority                     // pQueuePriorities
     };
 
+    // Allocate a dedicated present queue if necessary
+    uint32_t present_family;
+    m_queue_flags |= present_is_dedicated;
+    for (uint32_t family = QUEUE_FAMILY_FIRST; family < QUEUE_FAMILY_COUNT; ++family) {
+        if (m_window.m_present_capable_families.find(m_physical_device.queue_families.index_of[family]) != m_window.m_present_capable_families.end()) {
+            m_queue_flags &= (~present_is_dedicated);
+            present_family = m_physical_device.queue_families.index_of[family];
+            break;
+        }
+    }
+    if (m_queue_flags & present_is_dedicated) {
+        // Window class makes sure that there is at least one present queue by this point
+        queue.queueFamilyIndex = *(m_window.m_present_capable_families.begin());
+    }
+
+
     constexpr uint32_t universal_index = 0;
+    constexpr uint32_t present_index = 0;
     uint32_t compute_index = 0;
     uint32_t transfer_index = 0;
+
+    if (present_is_dedicated) {}
 
     if (m_physical_device.props.vendorID == VK_VENDOR_ID_AMD) {
         // Works best with 1 universal, 1 compute, and 1 transfer queue
@@ -529,6 +544,8 @@ bool Device::init() {
     // Store queues
     vkGetDeviceQueue(m_device, m_physical_device.queue_families.universal, universal_index, &m_universal_queue);
     
+    // TODO: are these "owns-self" checks necessary here?
+
     if (m_queue_flags & compute_owns_self)
         vkGetDeviceQueue(m_device, m_physical_device.queue_families.compute, compute_index, &m_compute_queue);
     else
@@ -539,6 +556,18 @@ bool Device::init() {
     else
         m_transfer_queue = m_universal_queue;
 
+    // The present queue gets stored in the window
+    vkGetDeviceQueue(m_device, present_family, present_index, &m_window.m_present_queue);
+
+    // Swapchain functions also in the window
+    m_window.vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>( vkGetDeviceProcAddr(m_device, "vkCreateSwapchainKHR") );
+    m_window.vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>( vkGetDeviceProcAddr(m_device, "vkDestroySwapchainKHR") );
+    m_window.vkGetSwapchainImagesKHR = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>( vkGetDeviceProcAddr(m_device, "vkGetSwapchainImagesKHR") );
+    m_window.vkAcquireNextImageKHR = reinterpret_cast<PFN_vkAcquireNextImageKHR>( vkGetDeviceProcAddr(m_device, "vkAcquireNextImageKHR") );
+    m_window.vkQueuePresentKHR = reinterpret_cast<PFN_vkQueuePresentKHR>( vkGetDeviceProcAddr(m_device, "vkQueuePresentKHR") );
+
+    // Oh and make sure to initialize the window's swapchain, now that we have a device
+    if (!m_window.init_swapchain(m_device)) return false;
 
     // Create memory allocator
     VmaAllocatorCreateInfo allocator_info = {
@@ -553,14 +582,13 @@ bool Device::init() {
     VkCommandPoolCreateInfo pool_info = {
         VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, // sType
         nullptr,                                    // pNext
-        command_pool_flags,                         // flags
-        m_physical_device.queue_families.universal  // queueFamilyIndex
+        command_pool_flags                          // flags
     };
 
     m_command_pools.resize(QUEUE_FAMILY_COUNT);
     for (uint32_t i = QUEUE_FAMILY_FIRST; i < QUEUE_FAMILY_COUNT; ++i) {
         for (uint32_t j = 0; j < n_threads; ++j) {
-            pool_info.queueFamilyIndex = m_physical_device.queue_families.indices[i];
+            pool_info.queueFamilyIndex = m_physical_device.queue_families.index_of[i];
             res = vkCreateCommandPool(m_device, &pool_info, NULL, &m_command_pools[j * QUEUE_FAMILY_COUNT + i]);
             if (!validate(res)) return false;
         }

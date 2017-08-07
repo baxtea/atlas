@@ -1,4 +1,5 @@
 #include "window.h"
+#include "backend.h"
 #include <assert.h>
 #include <stdio.h>
 #include <cstring>
@@ -97,8 +98,9 @@ void Window::handle_xcb_events() {
         switch (xcb->event->response_type & ~0x80) {
         case XCB_CLIENT_MESSAGE:
             cm = reinterpret_cast<xcb_client_message_event_t*>(xcb->event);
-            if (cm->data.data32[0] = xcb->delete_win_atom)
+            if (cm->data.data32[0] == xcb->delete_win_atom) {
                 m_should_close = true;
+            }
 
             break;
 
@@ -120,9 +122,10 @@ void Window::handle_xcb_events() {
 }
 
 void Window::shutdown_xcb() {
-    xcb_unmap_window(xcb->connection, xcb->window);
-    xcb_destroy_window(xcb->connection, xcb->window);
-    xcb_disconnect(xcb->connection);
+    if (xcb->window)
+        xcb_destroy_window(xcb->connection, xcb->window);
+    if (xcb->connection)
+        xcb_disconnect(xcb->connection);
 }
 
 
@@ -218,33 +221,43 @@ void Window::handle_win32_events() {
 }
 
 void Window::shutdown_win32() {
-    DestroyWindow(win32->window);
+    if (win32->window);
+        DestroyWindow(win32->window);
+
     UnregisterClassEx(m_name.c_str(), win32->inst);
 }
 
 #endif // _WIN32
 
+Window::Window(const Backend::Instance& instance, const std::string& name, uint32_t width, uint32_t height)
+    : Window(instance, instance.get_preferred_device_index(), name, width, height)
+{ }
 
-Window::Window(const Backend::Device& device, const std::string& name, uint32_t width, uint32_t height)
+
+Window::Window(const Backend::Instance& instance, uint32_t physical_device_index, const std::string& name, uint32_t width, uint32_t height)
     : m_name(name), m_width(width), m_height(height), m_fullscreen(false)
-    , m_should_close(false), m_image_is_old(false), n_swapchain_images(3)
-    , m_device(device), m_present_surface(VK_NULL_HANDLE), m_swapchain(VK_NULL_HANDLE)
+    , m_should_close(false), m_image_is_old(false), m_n_swapchain_images(3)
+    , m_instance(instance), m_surface(VK_NULL_HANDLE), m_swapchain(VK_NULL_HANDLE)
+    , m_physical_device_index(physical_device_index), vkCreateSwapchainKHR(VK_NULL_HANDLE), vkDestroySwapchainKHR(VK_NULL_HANDLE)
+    , vkGetSwapchainImagesKHR(VK_NULL_HANDLE), vkAcquireNextImageKHR(VK_NULL_HANDLE), vkQueuePresentKHR(VK_NULL_HANDLE)
 {
-    vkDestroySurfaceKHR = reinterpret_cast<PFN_vkDestroySurfaceKHR>( vkGetInstanceProcAddr(device.vk_instance(), "vkDestroySurfaceKHR") );
-    vkGetPhysicalDeviceSurfaceSupportKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceSupportKHR>( vkGetInstanceProcAddr(device.vk_instance(), "vkGetPhysicalDeviceSurfaceSupportKHR") );
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>( vkGetInstanceProcAddr(device.vk_instance(), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR") );
-    vkGetPhysicalDeviceSurfaceFormatsKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceFormatsKHR>( vkGetInstanceProcAddr(device.vk_instance(), "vkGetPhysicalDeviceSurfaceFormatsKHR") );
-    vkGetPhysicalDeviceSurfacePresentModesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfacePresentModesKHR>( vkGetInstanceProcAddr(device.vk_instance(), "vkGetPhysicalDeviceSurfacePresentModesKHR") );
+    // Surface functions
+    vkDestroySurfaceKHR = reinterpret_cast<PFN_vkDestroySurfaceKHR>( vkGetInstanceProcAddr(instance.vk(), "vkDestroySurfaceKHR") );
+    vkGetPhysicalDeviceSurfaceSupportKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceSupportKHR>( vkGetInstanceProcAddr(instance.vk(), "vkGetPhysicalDeviceSurfaceSupportKHR") );
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>( vkGetInstanceProcAddr(instance.vk(), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR") );
+    vkGetPhysicalDeviceSurfaceFormatsKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceFormatsKHR>( vkGetInstanceProcAddr(instance.vk(), "vkGetPhysicalDeviceSurfaceFormatsKHR") );
+    vkGetPhysicalDeviceSurfacePresentModesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfacePresentModesKHR>( vkGetInstanceProcAddr(instance.vk(), "vkGetPhysicalDeviceSurfacePresentModesKHR") );
 #ifdef _WIN32
-    vkCreateWin32SurfaceKHR = reinterpret_cast<PFN_vkCreateWin32SurfaceKHR>( vkGetInstanceProcAddr(device.vk_instance(), "vkCreateWin32SurfaceKHR") );
+    vkCreateWin32SurfaceKHR = reinterpret_cast<PFN_vkCreateWin32SurfaceKHR>( vkGetInstanceProcAddr(instance.vk(), "vkCreateWin32SurfaceKHR") );
 #else
-    vkCreateXcbSurfaceKHR = reinterpret_cast<PFN_vkCreateXcbSurfaceKHR>( vkGetInstanceProcAddr(device.vk_instance(), "vkCreateXcbSurfaceKHR") );
+    vkCreateXcbSurfaceKHR = reinterpret_cast<PFN_vkCreateXcbSurfaceKHR>( vkGetInstanceProcAddr(instance.vk(), "vkCreateXcbSurfaceKHR") );
 #endif
+    // Swapchain functions are loaded when the device is created
 }
 
 Window::~Window() {
-    if (m_present_surface)
-        vkDestroySurfaceKHR(m_device.vk_instance(), m_present_surface, nullptr);
+    if (m_surface)
+        vkDestroySurfaceKHR(m_instance.vk(), m_surface, nullptr);
 
 #   ifdef _WIN32
         shutdown_win32();
@@ -264,7 +277,7 @@ bool Window::init_surface() {
         win32->inst,                                        // hinstance
         win32->hwnd                                         // hwnd
     };
-    vkCreateWin32SurfaceKHR(m_device.vk_instance(), &surface_info, nullptr, &m_present_surface);
+    vkCreateWin32SurfaceKHR(m_instance.vk(), &surface_info, nullptr, &m_surface);
 
 #else
     VkXcbSurfaceCreateInfoKHR surface_info = {
@@ -274,126 +287,77 @@ bool Window::init_surface() {
         xcb->connection,                                // connection
         xcb->window                                     // window
     };
-    vkCreateXcbSurfaceKHR(m_device.vk_instance(), &surface_info, nullptr, &m_present_surface);
+    vkCreateXcbSurfaceKHR(m_instance.vk(), &surface_info, nullptr, &m_surface);
 #endif
 
-    VkPhysicalDevice phys = m_device.get_physical_device().device;
+    VkPhysicalDevice phys = m_instance.get_physical_device(m_physical_device_index).device;
 
     // Query physical device surface capabilities
-    VkResult res = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, m_present_surface, &m_surface_caps);
+    VkResult res = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, m_surface, &m_surface_caps);
     if (!validate(res)) return false;
 
     uint32_t n_surface_formats;
-    res = vkGetPhysicalDeviceSurfaceFormatsKHR(phys, m_present_surface, &n_surface_formats, NULL);
+    res = vkGetPhysicalDeviceSurfaceFormatsKHR(phys, m_surface, &n_surface_formats, NULL);
     if (!validate(res)) return false;
     m_surface_formats.resize(n_surface_formats);
-    res = vkGetPhysicalDeviceSurfaceFormatsKHR(phys, m_present_surface, &n_surface_formats, m_surface_formats.data());
+    res = vkGetPhysicalDeviceSurfaceFormatsKHR(phys, m_surface, &n_surface_formats, m_surface_formats.data());
     if (!validate(res)) return false;
     
     uint32_t n_present_modes;
-    res = vkGetPhysicalDeviceSurfacePresentModesKHR(phys, m_present_surface, &n_present_modes, NULL);
+    res = vkGetPhysicalDeviceSurfacePresentModesKHR(phys, m_surface, &n_present_modes, NULL);
     if (!validate(res)) return false;
     m_present_modes.resize(n_present_modes);
-    res = vkGetPhysicalDeviceSurfacePresentModesKHR(phys, m_present_surface, &n_present_modes, m_present_modes.data());
+    res = vkGetPhysicalDeviceSurfacePresentModesKHR(phys, m_surface, &n_present_modes, m_present_modes.data());
     if (!validate(res)) return false;
+
+    // Search for a present-capable queue
+    uint32_t n_physical_device_queues;
+    vkGetPhysicalDeviceQueueFamilyProperties(phys, &n_physical_device_queues, NULL);
+    bool no_present_queue = true;
+    VkBool32 supports_present;
+    for (uint32_t queue_family = 0; queue_family < n_physical_device_queues; ++queue_family) {
+        supports_present = VK_FALSE;
+        res = vkGetPhysicalDeviceSurfaceSupportKHR(phys, queue_family, m_surface, &supports_present);
+        if (validate(res) && supports_present) {
+            m_present_capable_families.insert(queue_family);
+            no_present_queue= false;
+        }
+    }
+
+    if (no_present_queue) {
+        Backend::error("Couldn't find a present-capable queue family!");
+        return false;
+    }
 
     return true;
 }
 
-bool Window::init_swapchain() {
+bool Window::init_swapchain(VkDevice device) {
     // TODO: implement
+/*    VkSwapchainCounterCreateInfoEXT swapchain_info = {
+        VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,    // sType
+        nullptr,                                        // pNext
+        surface_counters                                // surfaceCounters
+    };
 
-
+    VkResult res = vkCreateSwapchainKHR(device, &swapchain_info, nullptr, &m_swapchain);
+*/
     return true;
 }
 
 bool Window::init() {
 #   ifdef _WIN32
         win32 = static_cast<win32_info*>(malloc(sizeof(win32_info)));
-        return init_win32() && init_surface() && init_swapchain();
+        memset(&win32, sizeof(win32_info), 0);
+        return init_win32() && init_surface();
 #   else
         xcb = static_cast<xcb_info*>(malloc(sizeof(xcb_info)));
-        return init_xcb() && init_surface() && init_swapchain();
+        memset(&xcb, sizeof(xcb_info), 0);
+        return init_xcb() && init_surface();
 #   endif
-    //init_framebuffers(); ??
 }
 
 /*
-#include "misc/window.h"
-void do_nothing(void*) {};
-struct AnvilClone : public Anvil::Window {
-    AnvilClone(const std::string& title, uint32_t w, uint32_t h)
-    : Anvil::Window(title, w, h, &do_nothing, nullptr) {
-#   ifdef _WIN32
-#       if defined(ANVIL_INCLUDE_WIN3264_WINDOW_SYSTEM_SUPPORT)
-            m_platform = Anvil::WINDOW_PLATFORM_SYSTEM;
-#       else
-            fprintf(stderr, "[!] Found no Anvil equivalent to Atlas Win32 platform!\n");
-            m_platform = Anvil::WINDOW_PLATFORM_DUMMY;
-#       endif
-
-#   else // _WIN32
-#       if defined(ANVIL_INCLUDE_XCB_WINDOW_SYSTEM_SUPPORT)
-            m_platform = Anvil::WINDOW_PLATFORM_XCB;
-#       else
-            fprintf(stderr, "[!] Found no Anvil equivalent to Atlas xcb platform!\n");
-            m_platform = Anvil::WINDOW_PLATFORM_DUMMY;
-#       endif
-#   endif
-    }
-    ~AnvilClone() {};
-
-    void run() {};
-    Anvil::WindowPlatform m_platform;
-    Anvil::WindowPlatform get_platform() const {
-        return m_platform;
-    }
-    WindowHandle set_handle(WindowHandle handle) {
-        m_window = handle;
-    }
-};
-
-void Window::init_swapchain() {
-    AnvilClone* clone = new AnvilClone(m_name, m_width, m_height);
-#ifdef _WIN32
-    clone->set_handle(win32->window);
-#else
-    clone->set_handle(xcb->window);
-#endif
-
-    m_anvil_clone.reset(clone);
-
-        std::shared_ptr<Anvil::SGPUDevice> device_locked_ptr(g_device);
-
-    m_rendering_surface = Anvil::RenderingSurface::create(g_instance,
-                                                              g_device,
-                                                              m_anvil_clone);
-
-    m_rendering_surface->set_name((m_name + " rendering surface").c_str());
-
-
-    m_swapchain = device_locked_ptr->create_swapchain(m_rendering_surface,
-                                                          m_anvil_clone,
-                                                          VK_FORMAT_B8G8R8A8_UNORM,
-                                                          VK_PRESENT_MODE_FIFO_KHR,
-                                                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-                                                          m_n_swapchain_images);
-
-    m_swapchain->set_name((m_name + " swapchain").c_str());
-
-    // Cache the queue we are going to use for presentation
-    const std::vector<uint32_t>* present_queue_fams_ptr = nullptr;
-
-    if (!m_rendering_surface->get_queue_families_with_present_support(device_locked_ptr->get_physical_device(),
-                                                                         &present_queue_fams_ptr) )
-    {
-        anvil_assert_fail();
-    }
-
-    m_present_queue = device_locked_ptr->get_queue(present_queue_fams_ptr->at(0),
-                                                       0); // in_n_queue 
-}
-
 void Window::init_framebuffers() {
     bool result;
 
@@ -420,5 +384,15 @@ void Window::handle_events() {
     handle_win32_events();
 #else
     handle_xcb_events();
+#endif
+}
+
+void Window::close() {
+#if _WIN32
+    DestroyWindow(win32->hwnd);
+    win32->hwnd = 0;
+#else
+    xcb_destroy_window(xcb->connection, xcb->window);
+    xcb->window = 0;
 #endif
 }
