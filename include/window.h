@@ -45,22 +45,46 @@ namespace Atlas {
             m_should_close = request_close;
         }
 
+        // If the surface type permits it, recreate the swapchain with a different number of backbuffers
+        // vsync + double buffered => no tearing, no vsync + double buffered => tearing
+        // vsync + triple buffered => no tearing, no vsync + triple buffered => no tearing (when supported. depends on gpu capabilities)
+        bool set_triple_buffered(bool enable);
+
+        void set_vsync(bool enable);
+        inline bool get_vsync() const {
+            return m_vsync;
+        }
+
         //
         // Presentation
         //
-        // inline std::shared_ptr<Anvil::Swapchain> get_swapchain() {
-        //     return m_swapchain;
-        // }
-        void present();
+        void present(const std::vector<VkSemaphore> wait_semaphores);
 
-        // If the surface type permits it, switch to a swapchain with 
-        // If init() has already been called, this call may fail
-        bool set_triple_buffered(bool enable);
-        VkImage get_current_image();
+        void acquire_next_frame(uint64_t timeout = UINT64_MAX, VkFence signal_when_done = VK_NULL_HANDLE);
 
-        void set_vsync(bool enable);
-        inline bool get_vsync() const;
+        // Wait for this semaphore before rendering
+        inline VkSemaphore get_present_complete_semaphore() const {
+            return m_present_complete_semaphores[m_frame_index];
+        }
 
+        inline VkFramebuffer get_framebuffer() const {
+            return m_fbos[m_frame_index];
+        }
+        inline VkImage get_color_image() const {
+            return m_images[m_frame_index];
+        }
+        inline VkImageView get_color_image_view() const {
+            return m_image_views[m_frame_index];
+        }
+        inline VkImage get_depth_image() const {
+            return m_depth;
+        }
+        inline VkImageView get_depth_image_view() const {
+            return m_depth_view;
+        }
+        inline uint32_t get_frame_index() const {
+            return m_frame_index;
+        }
     protected:
         friend struct Backend::Device;
 #ifdef _WIN32
@@ -73,8 +97,9 @@ namespace Atlas {
         void shutdown_xcb();
 #endif
         bool init_surface();
-        bool init_swapchain(VkDevice device);
-        bool init_framebuffers(VkDevice device);
+        bool init_swapchain(Backend::Device* device);
+        // TODO: implement
+        bool init_framebuffers();
 
         const std::string m_name;
         // TODO: client (surface) dimensions vs window dimensions
@@ -90,6 +115,7 @@ namespace Atlas {
 
         // Defaults to triple buffered (3 images)
         uint32_t m_n_swapchain_images;
+        uint32_t m_frame_index;
         VkSurfaceCapabilitiesKHR m_surface_caps;
         std::vector<VkSurfaceFormatKHR> m_surface_formats;
         std::vector<VkPresentModeKHR> m_present_modes;
@@ -97,13 +123,16 @@ namespace Atlas {
         uint32_t m_physical_device_index;
         std::unordered_set<uint32_t> m_present_capable_families;
         const Backend::Instance& m_instance;
-        VkDevice m_device;
+        Backend::Device* m_device;
         VkQueue m_present_queue;
         VkSurfaceKHR m_surface;
         VkSwapchainKHR m_swapchain;
         std::vector<VkImage> m_images;
         std::vector<VkImageView> m_image_views;
+        VkImage m_depth;
+        VkImageView m_depth_view;
         std::vector<VkFramebuffer> m_fbos;
+        std::vector<VkSemaphore> m_present_complete_semaphores;
 
 
         // Surface functions
@@ -121,22 +150,13 @@ namespace Atlas {
 
         // Swapchain functions
         PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR;
-        PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
         PFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR;
         PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
         PFN_vkQueuePresentKHR vkQueuePresentKHR;
-        PFN_vkDestroyImageView vkDestroyImageView;
-        
-        /*
-        std::shared_ptr<Anvil::Window> m_anvil_clone; // Only cares about width, height, platform
-        std::shared_ptr<Anvil::RenderingSurface> m_rendering_surface;
-        std::shared_ptr<Anvil::Swapchain> m_swapchain;
-        std::shared_ptr<Anvil::Framebuffer> m_framebuffers[m_n_swapchain_images];
-        std::shared_ptr<Anvil::Queue> m_present_queue;*/
+        PFN_vkCreateSemaphore vkCreateSemaphore;
 
         bool m_fullscreen;
         bool m_should_close;
-        bool m_image_is_old;
         bool m_vsync;
     };
 }

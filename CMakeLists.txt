@@ -26,12 +26,14 @@ set(ATLAS_SRC_LIST  "include/mesh.h"
                     "include/my_math.h"
                     "include/window.h"
                     "include/backend.h"
+                    "include/shader.h"
                     
                     "src/mesh.cpp"
                     "src/camera.cpp"
                     "src/my_math.cpp"
                     "src/window.cpp"
-                    "src/backend.cpp")
+                    "src/backend.cpp"
+                    "src/shader.cpp")
 
 add_library(atlas ${ATLAS_SRC_LIST})
 

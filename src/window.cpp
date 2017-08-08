@@ -1,5 +1,7 @@
 #include "window.h"
 #include "backend.h"
+#include <algorithm>
+#include <array>
 #include <assert.h>
 #include <stdio.h>
 #include <cstring>
@@ -246,12 +248,11 @@ Window::Window(const Backend::Instance& instance, const std::string& name, uint3
 
 
 Window::Window(const Backend::Instance& instance, uint32_t physical_device_index, const std::string& name, uint32_t width, uint32_t height)
-    : m_name(name), m_width(width), m_height(height), m_fullscreen(false)
-    , m_should_close(false), m_image_is_old(false), m_n_swapchain_images(3)
-    , m_instance(instance), m_surface(VK_NULL_HANDLE), m_swapchain(VK_NULL_HANDLE)
-    , m_physical_device_index(physical_device_index), vkCreateSwapchainKHR(VK_NULL_HANDLE), vkDestroySwapchainKHR(VK_NULL_HANDLE)
-    , vkGetSwapchainImagesKHR(VK_NULL_HANDLE), vkAcquireNextImageKHR(VK_NULL_HANDLE), vkQueuePresentKHR(VK_NULL_HANDLE)
-    , vkGetPhysicalDeviceFormatProperties(VK_NULL_HANDLE), m_device(VK_NULL_HANDLE), m_vsync(true)
+    : m_name(name), m_width(width), m_height(height), m_fullscreen(false), m_vsync(true)
+    , m_should_close(false), m_n_swapchain_images(3), m_instance(instance), m_device(nullptr)
+    , m_physical_device_index(physical_device_index), m_surface(VK_NULL_HANDLE), m_swapchain(VK_NULL_HANDLE)
+    , m_depth(VK_NULL_HANDLE), m_depth_view(VK_NULL_HANDLE), vkCreateSwapchainKHR(VK_NULL_HANDLE), vkGetSwapchainImagesKHR(VK_NULL_HANDLE)
+    , vkAcquireNextImageKHR(VK_NULL_HANDLE), vkQueuePresentKHR(VK_NULL_HANDLE), vkGetPhysicalDeviceFormatProperties(VK_NULL_HANDLE)
 {
     // Surface functions
     vkDestroySurfaceKHR = reinterpret_cast<PFN_vkDestroySurfaceKHR>( vkGetInstanceProcAddr(instance.vk(), "vkDestroySurfaceKHR") );
@@ -269,7 +270,8 @@ Window::Window(const Backend::Instance& instance, uint32_t physical_device_index
 }
 
 Window::~Window() {
-    // Swapchain and image views are destroyed with the device destructor
+    // Semaphores, depth view, depth image, color image views, and swapchain are destroyed (in that order) with the device destructor
+    // Color images are released automatically when the swapchain is destroyed
 
     if (m_surface)
         vkDestroySurfaceKHR(m_instance.vk(), m_surface, nullptr);
@@ -347,7 +349,7 @@ bool Window::init_surface() {
     return true;
 }
 
-bool Window::init_swapchain(VkDevice device) {
+bool Window::init_swapchain(Backend::Device* device) {
     m_device = device;
     // If we don't make the new swapchain a derivative of the old one, all the resources have to be reloaded
     // (which is obviously too much for changing vsync)
@@ -424,7 +426,7 @@ bool Window::init_swapchain(VkDevice device) {
 
     // Find a supported composite alpha format
     VkCompositeAlphaFlagBitsKHR composite_alpha;
-    std::vector<VkCompositeAlphaFlagBitsKHR> preferred_alphas = {
+    const std::array<VkCompositeAlphaFlagBitsKHR, 4> preferred_alphas = {
         VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
         VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
@@ -470,25 +472,25 @@ bool Window::init_swapchain(VkDevice device) {
         old_swapchain                                   // oldSwapchain
     };
     
-    VkResult res = vkCreateSwapchainKHR(device, &swapchain_info, nullptr, &m_swapchain);
+    VkResult res = vkCreateSwapchainKHR(device->vk(), &swapchain_info, nullptr, &m_swapchain);
     if (!validate(res)) return false;
 
     // If this was a re-creation of an existing swapchain, destroy the old one
     // (also cleans up all the presentable images)
     if (old_swapchain != VK_NULL_HANDLE) {
         for (auto& view : m_image_views) {
-            vkDestroyImageView(device, view, nullptr);
+            vkDestroyImageView(device->vk(), view, nullptr);
         }
-        vkDestroySwapchainKHR(device, old_swapchain, nullptr);
+        vkDestroySwapchainKHR(device->vk(), old_swapchain, nullptr);
     }
 
     // Get the swapchain images
     uint32_t n_images;
-    res = vkGetSwapchainImagesKHR(device, m_swapchain, &n_images, nullptr);
+    res = vkGetSwapchainImagesKHR(device->vk(), m_swapchain, &n_images, nullptr);
     if (!validate(res)) return false;
     m_images.resize(n_images);
     m_image_views.resize(n_images);
-    res = vkGetSwapchainImagesKHR(device, m_swapchain, &n_images, m_images.data());
+    res = vkGetSwapchainImagesKHR(device->vk(), m_swapchain, &n_images, m_images.data());
     if (!validate(res)) return false;
 
 
@@ -516,10 +518,120 @@ bool Window::init_swapchain(VkDevice device) {
     };
     for (uint32_t i = 0; i < n_images; ++i) {
         attachment_view.image = m_images[i];
-        res = vkCreateImageView(device, &attachment_view, nullptr, &m_image_views[i]);
+        res = vkCreateImageView(device->vk(), &attachment_view, nullptr, &m_image_views[i]);
         if (!validate(res)) return false;
     }
 
+    //
+    // Create a depth/stencil buffer
+    //
+
+    // Find the best depth format
+    // TODO: change function signature to be able to require stencil
+    std::array<VkFormat, 5> depth_formats = {
+        VK_FORMAT_D32_SFLOAT_S8_UINT,
+        VK_FORMAT_D32_SFLOAT,
+        VK_FORMAT_D24_UNORM_S8_UINT,
+        VK_FORMAT_D16_UNORM_S8_UINT,
+        VK_FORMAT_D16_UNORM
+    };
+
+    VkFormat depth_format = VK_FORMAT_UNDEFINED;
+    VkImageTiling depth_tiling;
+    VkFormatProperties format_properties;
+    // Ideally, use a format which supports a depth/stencil attachment with optimal tiling
+    for (const auto& format : depth_formats) {
+        vkGetPhysicalDeviceFormatProperties(m_device->get_physical_device().device, format, &format_properties);
+        if (format_properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+            depth_format = format;
+            depth_tiling = VK_IMAGE_TILING_OPTIMAL;
+            break;
+        }
+    }
+    // Resort to linear tiling if it's the only one that supports a depth/stencil attachment
+    if (depth_format == VK_FORMAT_UNDEFINED) {
+        for (const auto& format : depth_formats) {
+            vkGetPhysicalDeviceFormatProperties(m_device->get_physical_device().device, format, &format_properties);
+            if (format_properties.linearTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+                depth_format = format;
+                depth_tiling = VK_IMAGE_TILING_OPTIMAL;
+                break;
+            }
+        }
+    }
+    if (depth_format == VK_FORMAT_UNDEFINED) {
+        Backend::error("No tiling formats support a depth/stencil attachment!");
+        return false;
+    }
+
+    // Create the image
+    VkImageCreateInfo depth_info = {
+        VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,            // sType
+        nullptr,                                        // pNext
+        0,                                              // flags
+        VK_IMAGE_TYPE_2D,                               // imageType
+        depth_format,                                   // format
+        {   extent.width,                               // extent
+            extent.height,
+            1
+        },
+        1,                                              // mipLevels
+        1,                                              // arrayLayers
+        VK_SAMPLE_COUNT_1_BIT,                          // samples
+        depth_tiling,                                   // tiling
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,    // usage
+        VK_SHARING_MODE_EXCLUSIVE,                      // sharingMode
+        0,                                              // queueFamilyIndexCount
+        0,                                              // pQueueFamilyIndices
+        VK_IMAGE_LAYOUT_UNDEFINED                       // initialLayout
+    };
+    VmaMemoryRequirements depth_reqs = {
+        VK_TRUE,                    // ownMemory
+        VMA_MEMORY_USAGE_GPU_ONLY   // usage
+        // Fill rest with 0s
+    };
+    res = vmaCreateImage(m_device->get_allocator(), &depth_info, &depth_reqs, &m_depth, nullptr, nullptr);
+    if (!validate(res)) return false;
+
+    // Add a stencil attachment if the depth image supports it
+    VkImageAspectFlags aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+    const std::array<VkFormat, 4> stencil_formats = {
+        VK_FORMAT_D16_UNORM_S8_UINT,
+        VK_FORMAT_D24_UNORM_S8_UINT,
+        VK_FORMAT_D32_SFLOAT_S8_UINT,
+        VK_FORMAT_S8_UINT
+    };
+    if (std::find(stencil_formats.begin(), stencil_formats.end(), depth_format) != stencil_formats.end())
+        aspect_mask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    
+
+    VkImageViewCreateInfo depth_view_info = {
+        VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,   // sType
+        nullptr,                                    // pNext
+        0,                                          // flags
+        m_depth,                                    // image
+        VK_IMAGE_VIEW_TYPE_2D,                      // viewType
+        depth_format,                               // format
+        {   VK_COMPONENT_SWIZZLE_R,
+            VK_COMPONENT_SWIZZLE_G,
+            VK_COMPONENT_SWIZZLE_B,
+            VK_COMPONENT_SWIZZLE_A
+        },                                          // components
+        {   aspect_mask,                            // aspectMask
+            0,                                      // baseMipLevel
+            1,                                      // levelCount
+            0,                                      // baseArrayLayer
+            1,                                      // layerCount
+        }                                           // subresourceRange
+    };
+
+    res = vkCreateImageView(m_device->vk(), &depth_view_info, nullptr, &m_depth_view);
+
+    return validate(res);
+}
+
+bool Window::init_framebuffers() {
     return true;
 }
 

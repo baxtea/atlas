@@ -138,6 +138,9 @@ namespace Atlas {
             inline VkDevice vk() const {
                 return m_device;
             }
+            inline VmaAllocator get_allocator() const {
+                return m_allocator;
+            }
         protected:
             std::unordered_set<std::string> m_supported_extensions;
             Atlas::Window& m_window;
@@ -157,6 +160,10 @@ namespace Atlas {
             static constexpr uint32_t transfer_is_dedicated = 1 << 3;
             static constexpr uint32_t present_is_dedicated = 1 << 4;
             uint32_t m_queue_flags;
+
+            PFN_vkDestroySemaphore vkDestroySemaphore;
+            PFN_vkDestroyImageView vkDestroyImageView;
+            PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
         };
 
         struct CommandBuffer {

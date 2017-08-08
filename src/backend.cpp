@@ -576,17 +576,6 @@ bool Device::init() {
     // The present queue gets stored in the window
     vkGetDeviceQueue(m_device, present_family, present_index, &m_window.m_present_queue);
 
-    // Swapchain functions also in the window
-    m_window.vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>( vkGetDeviceProcAddr(m_device, "vkCreateSwapchainKHR") );
-    m_window.vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>( vkGetDeviceProcAddr(m_device, "vkDestroySwapchainKHR") );
-    m_window.vkGetSwapchainImagesKHR = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>( vkGetDeviceProcAddr(m_device, "vkGetSwapchainImagesKHR") );
-    m_window.vkAcquireNextImageKHR = reinterpret_cast<PFN_vkAcquireNextImageKHR>( vkGetDeviceProcAddr(m_device, "vkAcquireNextImageKHR") );
-    m_window.vkQueuePresentKHR = reinterpret_cast<PFN_vkQueuePresentKHR>( vkGetDeviceProcAddr(m_device, "vkQueuePresentKHR") );
-    m_window.vkDestroyImageView = reinterpret_cast<PFN_vkDestroyImageView>( vkGetDeviceProcAddr(m_device, "vkDestroyImageView") );
-
-    // Oh and make sure to initialize the window's swapchain, now that we have a device
-    if (!m_window.init_swapchain(m_device)) return false;
-
     // Create memory allocator
     VmaAllocatorCreateInfo allocator_info = {
         m_physical_device.device,
@@ -611,15 +600,34 @@ bool Device::init() {
             if (!validate(res)) return false;
         }
     }
+
+    // Swapchain functions also in the window
+    m_window.vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>( vkGetDeviceProcAddr(m_device, "vkCreateSwapchainKHR") );
+    m_window.vkGetSwapchainImagesKHR = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>( vkGetDeviceProcAddr(m_device, "vkGetSwapchainImagesKHR") );
+    m_window.vkAcquireNextImageKHR = reinterpret_cast<PFN_vkAcquireNextImageKHR>( vkGetDeviceProcAddr(m_device, "vkAcquireNextImageKHR") );
+    m_window.vkQueuePresentKHR = reinterpret_cast<PFN_vkQueuePresentKHR>( vkGetDeviceProcAddr(m_device, "vkQueuePresentKHR") );
+    m_window.vkCreateSemaphore = reinterpret_cast<PFN_vkCreateSemaphore>( vkGetDeviceProcAddr(m_device, "vkCreateSemaphore") );
+    // But the destroy functions are stored here, since they are called in *our* destructor
+    vkDestroySemaphore = reinterpret_cast<PFN_vkDestroySemaphore>( vkGetDeviceProcAddr(m_device, "vkDestroySemaphore") );
+    vkDestroyImageView = reinterpret_cast<PFN_vkDestroyImageView>( vkGetDeviceProcAddr(m_device, "vkDestroyImageView") );
+    vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>( vkGetDeviceProcAddr(m_device, "vkDestroySwapchainKHR") );
+
+    // Oh and make sure to initialize the window's swapchain, now that we have a device
+    if (!m_window.init_swapchain(this) || !m_window.init_framebuffers()) return false;
     
     return true;
 }
 
 Device::~Device() {
-    for (auto iter = m_command_pools.rbegin(); iter != m_command_pools.rend(); ++iter) {
+    // Release the resources that windows can't do themselves (since the device will be invalid before their destructor)
+    for (auto iter = m_window.m_present_complete_semaphores.rbegin(); iter != m_window.m_present_complete_semaphores.rend(); ++iter) {
         if (*iter)
-            vkDestroyCommandPool(m_device, *iter, NULL);
+            vkDestroySemaphore(m_device, *iter, nullptr);
     }
+    if (m_window.m_depth_view)
+        vkDestroyImageView(m_device, m_window.m_depth_view, nullptr);
+    if (m_window.m_depth)
+        vmaDestroyImage(m_allocator, m_window.m_depth);
 
     if (m_window.m_swapchain) {
         for (auto view = m_window.m_image_views.rbegin(); view != m_window.m_image_views.rend(); ++view) {
@@ -627,6 +635,11 @@ Device::~Device() {
                 vkDestroyImageView(m_device, *view, NULL);
         }
         vkDestroySwapchainKHR(m_device, m_window.m_swapchain, nullptr);
+    }
+
+    for (auto iter = m_command_pools.rbegin(); iter != m_command_pools.rend(); ++iter) {
+        if (*iter)
+            vkDestroyCommandPool(m_device, *iter, NULL);
     }
 
     if (m_allocator)
