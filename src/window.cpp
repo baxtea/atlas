@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <cstring>
+#include <chrono>
 
 using namespace Atlas;
 
@@ -24,7 +25,7 @@ struct Window::xcb_info {
 bool Window::init_xcb() {
     xcb->connection = xcb_connect(NULL, NULL);
     if (xcb_connection_has_error(xcb->connection)) {
-        fprintf(stderr, "[!] Could not connect to X server\n");
+        Backend::error("Could not connect to X server");
         return false;
     }
 
@@ -52,7 +53,8 @@ bool Window::init_xcb() {
 
     xcb_generic_error_t* err = xcb_request_check(xcb->connection, err_cookie);
     if (err != NULL)  {
-        fprintf(stderr, "[!] Could not create window. X11 error %d\n", err->error_code);
+        std::string err_string = "Could not create window. X11 error " + err->error_code;
+        Backend::error(err_string);
         return false;
     }
 
@@ -70,7 +72,8 @@ bool Window::init_xcb() {
     err_cookie = xcb_change_property_checked(xcb->connection, XCB_PROP_MODE_REPLACE, xcb->window,
         protocols_reply->atom, 4, 32, 1, &delete_reply->atom);
     if (err != NULL)  {
-        fprintf(stderr, "[!] Could not override window destroy handler. X11 error %d\n", err->error_code);
+        std::string err_string = "Could not override window delete handler. X11 error " + err->error_code;
+        Backend::error(err_string);
         return false;
     }
 
@@ -83,7 +86,7 @@ bool Window::init_xcb() {
     xcb_map_window(xcb->connection, xcb->window);
     
     if (xcb_flush(xcb->connection) <= 0) {
-        fprintf(stderr, "[!] Error while flushing xcb stream!\n");
+        Backend::error("Error while flushing xcb stream!");
         return false;
     }
 
@@ -187,7 +190,8 @@ bool Window::init_win32() {
     wc.hIconSm          = (HICON)LoadIcon(NULL, MAKEINTRESOURCE(IDI_APPLICATION));
 
     if (!RegisterClassEx(&wc)) {
-        fprintf(stderr, "[!] Failed to register WNDCLASSEX! Error code %d\n", GetLastError());
+        std::string err_string = "Failed to register WNDCLASSEX! Error code " + GetLastError();
+        Backend::error(err_string);
         return false;
     }
 
@@ -207,7 +211,7 @@ bool Window::init_win32() {
                 NULL);                  // Don't pass anything to WM_CREATE
     
     if (!win32->hwnd) {
-        fprintf(stderr, "[!] Failed to create window!\n");
+        Backend::error("Failed to create window!\n");
         return false;
     }
 

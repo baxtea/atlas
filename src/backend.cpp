@@ -1,13 +1,14 @@
 #define VMA_IMPLEMENTATION
 #include <algorithm>
 #include "backend.h"
-#include <algorithm>
 #include <stdio.h>
 #include <assert.h>
+#include <chrono>
 
 using namespace Atlas;
 
-// TODO: log functions display time
+std::chrono::high_resolution_clock::time_point g_startup;
+uint32_t g_hr=0, g_min=0, g_sec=0, g_ms=0;
 
 void Backend::log(const std::string& message) {
     Instance::default_dbg_callback(VK_DEBUG_REPORT_DEBUG_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT, 0, 0, 0, "App", message.c_str(), nullptr);
@@ -22,89 +23,95 @@ void Backend::error(const std::string& message) {
 }
 
 bool Atlas::validate(VkResult result) {
+    auto duration = std::chrono::high_resolution_clock::now() - g_startup;
+    g_hr = std::chrono::duration_cast<std::chrono::hours>(duration).count();
+    g_min = std::chrono::duration_cast<std::chrono::minutes>(duration).count() - g_hr*60;
+    g_sec = std::chrono::duration_cast<std::chrono::seconds>(duration).count() - g_hr*360 - g_min*60;
+    g_ms = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count() - g_hr*360000 - g_min*60000 - g_sec*1000;
+
     switch (result) {
     case VK_SUCCESS:
     case VK_EVENT_SET:
     case VK_EVENT_RESET:
         return true;
     case VK_NOT_READY:
-        printf("[*] Warning: A fence or query not yet completed.\n");
+        printf("%02d:%02d:%02d.%03d [*] Warning: A fence or query not yet completed.\n", g_hr, g_min, g_sec, g_ms);
         fflush(stdout);
         return true;
     case VK_TIMEOUT:
-        printf("[*] Warning: A wait operation has not completed in the specified time.\n");
+        printf("%02d:%02d:%02d.%03d [*] Warning: A wait operation has not completed in the specified time.\n", g_hr, g_min, g_sec, g_ms);
         fflush(stdout);
         return true;
     case VK_INCOMPLETE:
-        printf("[*] Warning: A return array was too small for the result.\n");
+        printf("%02d:%02d:%02d.%03d [*] Warning: A return array was too small for the result.\n", g_hr, g_min, g_sec, g_ms);
         fflush(stdout);
         return true;
     case VK_SUBOPTIMAL_KHR:
-        printf("[*] Warning: A swapchain no longer matches the surface properties exactly, but can still be used to present successfully.\n");
+        printf("%02d:%02d:%02d.%03d [*] Warning: A swapchain no longer matches the surface properties exactly, but can still be used to present successfully.\n", g_hr, g_min, g_sec, g_ms);
         fflush(stdout);
         return true;
     case VK_ERROR_OUT_OF_HOST_MEMORY:
-        fprintf(stderr, "[!] Error: A host memory allocation has failed!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: A host memory allocation has failed!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_OUT_OF_DEVICE_MEMORY:
-        fprintf(stderr, "[!] Error: A device memory allocation has failed!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: A device memory allocation has failed!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_INITIALIZATION_FAILED:
-        fprintf(stderr, "[!] Error: Initialization of an object could not be completed for implementation-specific reasons!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: Initialization of an object could not be completed for implementation-specific reasons!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_DEVICE_LOST:
-        fprintf(stderr, "[!] Error: The logical or physical device has been lost!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: The logical or physical device has been lost!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_MEMORY_MAP_FAILED:
-        fprintf(stderr, "[!] Error: Mapping of a memory object has failed!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: Mapping of a memory object has failed!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_LAYER_NOT_PRESENT:
-        fprintf(stderr, "[!] Error: A requested layer is not present or could not be loaded!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: A requested layer is not present or could not be loaded!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_EXTENSION_NOT_PRESENT:
-        fprintf(stderr, "[!] Error: A requested extension is not supported!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: A requested extension is not supported!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_FEATURE_NOT_PRESENT:
-        fprintf(stderr, "[!] Error: A requested feature is not supported!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: A requested feature is not supported!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_INCOMPATIBLE_DRIVER:
-        fprintf(stderr, "[!] Error: The requested version of Vulkan is not supported by the driver or is otherwise incompatible for implementation-sepcific reasons!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: The requested version of Vulkan is not supported by the driver or is otherwise incompatible for implementation-sepcific reasons!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_TOO_MANY_OBJECTS:
-        fprintf(stderr, "[!] Error: Too many objects of the type have already been created!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: Too many objects of the type have already been created!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_FORMAT_NOT_SUPPORTED:
-        fprintf(stderr, "[!] Error: A requested format is not supported on this device!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: A requested format is not supported on this device!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_FRAGMENTED_POOL:
-        fprintf(stderr, "[!] Error: A requested pool allocation has failed due to fragmentation of the pool's memory!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: A requested pool allocation has failed due to fragmentation of the pool's memory!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_SURFACE_LOST_KHR:
-        fprintf(stderr, "[!] Error: A surface is no longer available!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: A surface is no longer available!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR:
-        fprintf(stderr, "[!] Error: The requested window is already connected to a VkSurfaceKHR, or to some other non-Vulkan API!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: The requested window is already connected to a VkSurfaceKHR, or to some other non-Vulkan API!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_OUT_OF_DATE_KHR:
-        fprintf(stderr, "[!] Error: A surface has changed in such a way that it is no longer compatible with the swapchain, and further presentation requests using the swapchain will fail! Applications must query the new surface properties and recreate their swapchain if they wish to continue presenting to the surface.\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: A surface has changed in such a way that it is no longer compatible with the swapchain, and further presentation requests using the swapchain will fail! Applications must query the new surface properties and recreate their swapchain if they wish to continue presenting to the surface.\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     case VK_ERROR_INCOMPATIBLE_DISPLAY_KHR:
-        fprintf(stderr, "[!] Error: The display used by a swapchain does not use the same presentable image layout, or is incompatible in a way that prevents sharing an image!\n");
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error: The display used by a swapchain does not use the same presentable image layout, or is incompatible in a way that prevents sharing an image!\n", g_hr, g_min, g_sec, g_ms);
         fflush(stderr);
         return false;
     }
@@ -114,6 +121,13 @@ bool Atlas::validate(VkResult result) {
 using namespace Backend;
 
 VkBool32 Instance::default_dbg_callback(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT objType, uint64_t srcObject, size_t location, int32_t msgCode, const char* pLayerPrefix, const char* pMsg, void* pUserData) {
+    auto duration = std::chrono::high_resolution_clock::now() - g_startup;
+    g_hr = std::chrono::duration_cast<std::chrono::hours>(duration).count();
+    g_min = std::chrono::duration_cast<std::chrono::minutes>(duration).count() - g_hr*60;
+    g_sec = std::chrono::duration_cast<std::chrono::seconds>(duration).count() - g_hr*360 - g_min*60;
+    g_ms = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count() - g_hr*360000 - g_min*60000 - g_sec*1000;
+
+    
     // Select prefix depending on flags passed to the callback
     // Note that multiple flags may be set for a single validation message
     std::string desc;
@@ -137,11 +151,11 @@ VkBool32 Instance::default_dbg_callback(VkDebugReportFlagsEXT flags, VkDebugRepo
     }
 
     if (flags & VK_DEBUG_REPORT_ERROR_BIT_EXT) {
-        fprintf(stderr, "[!] Error (%s, code %d): %s\n", pLayerPrefix, msgCode, pMsg);
+        fprintf(stderr, "%02d:%02d:%02d.%03d [!] Error (%s, code %d): %s\n", g_hr, g_min, g_sec, g_ms, pLayerPrefix, msgCode, pMsg);
         //fflush(stderr);
     }
     else {
-        printf("[*]%s (%s, code %d): %s\n", desc.c_str(), pLayerPrefix, msgCode, pMsg);
+        printf("%02d:%02d:%02d.%03d [*]%s (%s, code %d): %s\n", g_hr, g_min, g_sec, g_ms, desc.c_str(), pLayerPrefix, msgCode, pMsg);
         //fflush(stdout);
     }
 
@@ -158,6 +172,9 @@ Instance::Instance(const std::string& app_name, uint32_t app_version, Validation
     : m_dbg_callback(VK_NULL_HANDLE), m_instance(VK_NULL_HANDLE), instance_flags(0), m_validation(validation_level)
     , m_app_name(app_name), m_app_version(app_version)
 {
+    // Record app startup time
+    g_startup = std::chrono::high_resolution_clock::now();
+
     // Enumerate layers
     uint32_t n_supported_layers;
     VkResult res = vkEnumerateInstanceLayerProperties(&n_supported_layers, NULL);
