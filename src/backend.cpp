@@ -565,6 +565,7 @@ bool Device::init() {
     m_window.vkGetSwapchainImagesKHR = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>( vkGetDeviceProcAddr(m_device, "vkGetSwapchainImagesKHR") );
     m_window.vkAcquireNextImageKHR = reinterpret_cast<PFN_vkAcquireNextImageKHR>( vkGetDeviceProcAddr(m_device, "vkAcquireNextImageKHR") );
     m_window.vkQueuePresentKHR = reinterpret_cast<PFN_vkQueuePresentKHR>( vkGetDeviceProcAddr(m_device, "vkQueuePresentKHR") );
+    m_window.vkDestroyImageView = reinterpret_cast<PFN_vkDestroyImageView>( vkGetDeviceProcAddr(m_device, "vkDestroyImageView") );
 
     // Oh and make sure to initialize the window's swapchain, now that we have a device
     if (!m_window.init_swapchain(m_device)) return false;
@@ -602,6 +603,15 @@ Device::~Device() {
         if (*iter)
             vkDestroyCommandPool(m_device, *iter, NULL);
     }
+
+    if (m_window.m_swapchain) {
+        for (auto view = m_window.m_image_views.rbegin(); view != m_window.m_image_views.rend(); ++view) {
+            if (*view)
+                vkDestroyImageView(m_device, *view, NULL);
+        }
+        vkDestroySwapchainKHR(m_device, m_window.m_swapchain, nullptr);
+    }
+
     if (m_allocator)
         vmaDestroyAllocator(m_allocator);
 

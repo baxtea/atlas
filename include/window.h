@@ -58,6 +58,9 @@ namespace Atlas {
         bool set_triple_buffered(bool enable);
         VkImage get_current_image();
 
+        void set_vsync(bool enable);
+        inline bool get_vsync() const;
+
     protected:
         friend struct Backend::Device;
 #ifdef _WIN32
@@ -74,6 +77,7 @@ namespace Atlas {
         bool init_framebuffers(VkDevice device);
 
         const std::string m_name;
+        // TODO: client (surface) dimensions vs window dimensions
         uint32_t m_width, m_height;
 
 
@@ -93,10 +97,12 @@ namespace Atlas {
         uint32_t m_physical_device_index;
         std::unordered_set<uint32_t> m_present_capable_families;
         const Backend::Instance& m_instance;
+        VkDevice m_device;
         VkQueue m_present_queue;
         VkSurfaceKHR m_surface;
         VkSwapchainKHR m_swapchain;
-        VkImage m_current_image;
+        std::vector<VkImage> m_images;
+        std::vector<VkImageView> m_image_views;
         std::vector<VkFramebuffer> m_fbos;
 
 
@@ -106,6 +112,7 @@ namespace Atlas {
         PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
         PFN_vkGetPhysicalDeviceSurfaceFormatsKHR vkGetPhysicalDeviceSurfaceFormatsKHR;
         PFN_vkGetPhysicalDeviceSurfacePresentModesKHR vkGetPhysicalDeviceSurfacePresentModesKHR;
+        PFN_vkGetPhysicalDeviceFormatProperties vkGetPhysicalDeviceFormatProperties;
 #ifdef _WIN32
         PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR;
 #else
@@ -118,7 +125,7 @@ namespace Atlas {
         PFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR;
         PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
         PFN_vkQueuePresentKHR vkQueuePresentKHR;
-
+        PFN_vkDestroyImageView vkDestroyImageView;
         
         /*
         std::shared_ptr<Anvil::Window> m_anvil_clone; // Only cares about width, height, platform
@@ -130,6 +137,7 @@ namespace Atlas {
         bool m_fullscreen;
         bool m_should_close;
         bool m_image_is_old;
+        bool m_vsync;
     };
 }
 

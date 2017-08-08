@@ -103,7 +103,7 @@ void Window::handle_xcb_events() {
             }
 
             break;
-
+/*
         case XCB_EXPOSE:
             expose = reinterpret_cast<xcb_expose_event_t*>(xcb->event);
             if (expose->window == xcb->window) {
@@ -111,7 +111,7 @@ void Window::handle_xcb_events() {
                 m_height = expose->height;
             }
             break;
-
+*/
         default:
             // Unknown event type, ignore it
             break;
@@ -247,6 +247,7 @@ Window::Window(const Backend::Instance& instance, uint32_t physical_device_index
     , m_instance(instance), m_surface(VK_NULL_HANDLE), m_swapchain(VK_NULL_HANDLE)
     , m_physical_device_index(physical_device_index), vkCreateSwapchainKHR(VK_NULL_HANDLE), vkDestroySwapchainKHR(VK_NULL_HANDLE)
     , vkGetSwapchainImagesKHR(VK_NULL_HANDLE), vkAcquireNextImageKHR(VK_NULL_HANDLE), vkQueuePresentKHR(VK_NULL_HANDLE)
+    , vkGetPhysicalDeviceFormatProperties(VK_NULL_HANDLE), m_device(VK_NULL_HANDLE), m_vsync(true)
 {
     // Surface functions
     vkDestroySurfaceKHR = reinterpret_cast<PFN_vkDestroySurfaceKHR>( vkGetInstanceProcAddr(instance.vk(), "vkDestroySurfaceKHR") );
@@ -254,15 +255,18 @@ Window::Window(const Backend::Instance& instance, uint32_t physical_device_index
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>( vkGetInstanceProcAddr(instance.vk(), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR") );
     vkGetPhysicalDeviceSurfaceFormatsKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceFormatsKHR>( vkGetInstanceProcAddr(instance.vk(), "vkGetPhysicalDeviceSurfaceFormatsKHR") );
     vkGetPhysicalDeviceSurfacePresentModesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfacePresentModesKHR>( vkGetInstanceProcAddr(instance.vk(), "vkGetPhysicalDeviceSurfacePresentModesKHR") );
+    vkGetPhysicalDeviceFormatProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceFormatProperties>( vkGetInstanceProcAddr(instance.vk(), "vkGetPhysicalDeviceFormatProperties") );
 #ifdef _WIN32
     vkCreateWin32SurfaceKHR = reinterpret_cast<PFN_vkCreateWin32SurfaceKHR>( vkGetInstanceProcAddr(instance.vk(), "vkCreateWin32SurfaceKHR") );
 #else
     vkCreateXcbSurfaceKHR = reinterpret_cast<PFN_vkCreateXcbSurfaceKHR>( vkGetInstanceProcAddr(instance.vk(), "vkCreateXcbSurfaceKHR") );
 #endif
-    // Swapchain functions are loaded when the device is created
+    // Swapchain functions are loaded when the device is initialized
 }
 
 Window::~Window() {
+    // Swapchain and image views are destroyed with the device destructor
+
     if (m_surface)
         vkDestroySurfaceKHR(m_instance.vk(), m_surface, nullptr);
 
@@ -340,15 +344,178 @@ bool Window::init_surface() {
 }
 
 bool Window::init_swapchain(VkDevice device) {
-    // TODO: implement
-/*    VkSwapchainCounterCreateInfoEXT swapchain_info = {
+    m_device = device;
+    // If we don't make the new swapchain a derivative of the old one, all the resources have to be reloaded
+    // (which is obviously too much for changing vsync)
+    VkSwapchainKHR old_swapchain = m_swapchain;
+
+    // Get preferred formats
+    VkFormat color_format;
+    VkColorSpaceKHR color_space;
+    if ( (m_surface_formats.size() == 1) && (m_surface_formats[0].format == VK_FORMAT_UNDEFINED) ) {
+        // There is no preferred format, so assume VK_FORMAT_B8G8R8A8_UNORM
+        color_format = VK_FORMAT_B8G8R8A8_UNORM;
+        color_space = m_surface_formats[0].colorSpace;
+    }
+    else {
+        // Iterate over the list of available surface formats and look for VK_FORMAT_B8G8R8A8_UNORM
+        bool found_B8G8R8A8_UNORM = false;
+        for (const auto& format : m_surface_formats) {
+            if (format.format == VK_FORMAT_B8G8R8A8_UNORM) {
+                color_format = format.format;
+                color_space = format.colorSpace;
+                found_B8G8R8A8_UNORM = true;
+                break;
+            }
+        }
+        // If it is not available, select the first available color format
+        if (!found_B8G8R8A8_UNORM) {
+            color_format = m_surface_formats[0].format;
+            color_space = m_surface_formats[0].colorSpace;
+        }
+    }
+
+    // Image size
+    VkExtent2D extent;
+    if (m_surface_caps.currentExtent.width == (uint32_t)-1) {
+        // 0xFFFFFFFF means that the dimensions can be requested
+        extent.width = m_width;
+        extent.height = m_height;
+    }
+    else {
+        // If the surface size is defined, the swap chain size must match
+        extent = m_surface_caps.currentExtent;
+    }
+
+    // Swapchain present mode
+    VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
+    if (!m_vsync) {
+        // TODO: Look into VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR
+        for (const auto& mode : m_present_modes) {
+            if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
+                // Lowest-latency non-tearing present mode
+                present_mode = VK_PRESENT_MODE_MAILBOX_KHR;
+                break;
+            }
+            else if ( (present_mode != VK_PRESENT_MODE_MAILBOX_KHR) && (mode == VK_PRESENT_MODE_IMMEDIATE_KHR) ) {
+                // May (and probably will) tear, but no latency
+                present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+            }
+        }
+    }
+
+    // Swapchain image count
+    uint32_t desired_n_images = m_surface_caps.minImageCount + 1;
+    if ( (m_surface_caps.maxImageCount > 0) && (desired_n_images > m_surface_caps.maxImageArrayLayers) ) {
+        // Be safe in the case where min = max, and min + 1 is no good
+        desired_n_images = m_surface_caps.maxImageCount;
+    }
+
+    // Surface transformation
+    VkSurfaceTransformFlagsKHR pre_transform = m_surface_caps.currentTransform;
+    if (m_surface_caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) {
+        // Set to a non-rotated transform, it available
+        pre_transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    }
+
+    // Find a supported composite alpha format
+    VkCompositeAlphaFlagBitsKHR composite_alpha;
+    std::vector<VkCompositeAlphaFlagBitsKHR> preferred_alphas = {
+        VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
+        VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
+        VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR
+    };
+    for (const auto& alpha : preferred_alphas) {
+        if (m_surface_caps.supportedCompositeAlpha & alpha) {
+            composite_alpha = alpha;
+            break;
+        }
+    }
+
+    // Set an additional usage flag for blitting with the swapchain images if supported
+    VkImageUsageFlags image_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    VkFormatProperties format_props;
+    vkGetPhysicalDeviceFormatProperties(m_instance.get_physical_device(m_physical_device_index).device, color_format, &format_props);
+    if (format_props.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT) {
+        image_usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    }
+    if (format_props.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT) {
+        image_usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    }
+
+    // Create the swapchain
+    VkSwapchainCreateInfoKHR swapchain_info = {
         VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,    // sType
         nullptr,                                        // pNext
-        surface_counters                                // surfaceCounters
+        0,                                              // flags
+        m_surface,                                      // surface
+        desired_n_images,                               // minImageCount
+        color_format,                                   // imageFormat
+        color_space,                                    // imageColorSpace
+        extent,                                         // imageExtent
+        1,                                              // imageArrayLayers
+        image_usage,                                    // imageUsage
+        VK_SHARING_MODE_EXCLUSIVE,                      // imageSharingMode
+        0,                                              // queueFamilyIndexCount (ignored when imageSharingMode is exlusive)
+        nullptr,                                        // pQueueFamilyIndices (also ignored)
+        (VkSurfaceTransformFlagBitsKHR)pre_transform,   // preTransform
+        composite_alpha,                                // compositeAlpha
+        present_mode,                                   // presentMode
+        VK_TRUE,                                        // clipped
+        old_swapchain                                   // oldSwapchain
     };
-
+    
     VkResult res = vkCreateSwapchainKHR(device, &swapchain_info, nullptr, &m_swapchain);
-*/
+    if (!validate(res)) return false;
+
+    // If this was a re-creation of an existing swapchain, destroy the old one
+    // (also cleans up all the presentable images)
+    if (old_swapchain != VK_NULL_HANDLE) {
+        for (auto& view : m_image_views) {
+            vkDestroyImageView(device, view, nullptr);
+        }
+        vkDestroySwapchainKHR(device, old_swapchain, nullptr);
+    }
+
+    // Get the swapchain images
+    uint32_t n_images;
+    res = vkGetSwapchainImagesKHR(device, m_swapchain, &n_images, nullptr);
+    if (!validate(res)) return false;
+    m_images.resize(n_images);
+    m_image_views.resize(n_images);
+    res = vkGetSwapchainImagesKHR(device, m_swapchain, &n_images, m_images.data());
+    if (!validate(res)) return false;
+
+
+    // Create image views
+    VkImageSubresourceRange subresource_range = {
+        VK_IMAGE_ASPECT_COLOR_BIT,  // aspectMask
+        0,                          // baseMipLevel
+        1,                          // levelCount
+        0,                          // baseArrayLayer
+        1                           // layerCount
+    };
+    VkImageViewCreateInfo attachment_view = {
+        VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,   // sType
+        nullptr,                                    // pNext
+        0,                                          // flags
+        VK_NULL_HANDLE,                             // image
+        VK_IMAGE_VIEW_TYPE_2D,                      // viewType
+        color_format,                               // format
+        {   VK_COMPONENT_SWIZZLE_R,
+            VK_COMPONENT_SWIZZLE_G,
+            VK_COMPONENT_SWIZZLE_B,
+            VK_COMPONENT_SWIZZLE_A
+        },                                          // components
+        subresource_range                           // subresourceRange
+    };
+    for (uint32_t i = 0; i < n_images; ++i) {
+        attachment_view.image = m_images[i];
+        res = vkCreateImageView(device, &attachment_view, nullptr, &m_image_views[i]);
+        if (!validate(res)) return false;
+    }
+
     return true;
 }
 
