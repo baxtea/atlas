@@ -613,14 +613,14 @@ bool Device::init() {
     vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>( vkGetDeviceProcAddr(m_device, "vkDestroySwapchainKHR") );
 
     // Oh and make sure to initialize the window's swapchain, now that we have a device
-    if (!m_window.init_swapchain(this) || !m_window.init_framebuffers()) return false;
+    if (!m_window.init_swapchain(this)) return false;
     
     return true;
 }
 
 Device::~Device() {
     // Release the resources that windows can't do themselves (since the device will be invalid before their destructor)
-    for (auto iter = m_window.m_present_complete_semaphores.rbegin(); iter != m_window.m_present_complete_semaphores.rend(); ++iter) {
+    for (auto iter = m_window.m_image_available_semaphores.rbegin(); iter != m_window.m_image_available_semaphores.rend(); ++iter) {
         if (*iter)
             vkDestroySemaphore(m_device, *iter, nullptr);
     }

@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include <string>
 #include <memory>
+#include <limits>
 #include <stdint.h>
 
 #ifdef _WIN32
@@ -58,17 +59,23 @@ namespace Atlas {
         //
         // Presentation
         //
-        void present(const std::vector<VkSemaphore> wait_semaphores);
+        bool present(const std::vector<VkSemaphore> semaphores_wait_before_presenting = {});
 
-        void acquire_next_frame(uint64_t timeout = UINT64_MAX, VkFence signal_when_done = VK_NULL_HANDLE);
+        // Probably asynchronous, but the spec doesn't guarantee it
+        bool acquire_next_frame(uint64_t timeout = std::numeric_limits<uint64_t>::max(), VkFence fence_signal_when_done = VK_NULL_HANDLE);
 
-        // Wait for this semaphore before rendering
-        inline VkSemaphore get_present_complete_semaphore() const {
-            return m_present_complete_semaphores[m_frame_index];
+        inline VkSemaphore get_image_available_semaphore() const {
+            return m_image_available_semaphores[m_frame_index];
+        }
+        inline VkSemaphore get_image_available_semaphore(uint32_t index) const {
+            return m_image_available_semaphores[index];
         }
 
-        inline VkFramebuffer get_framebuffer() const {
-            return m_fbos[m_frame_index];
+        inline VkImage get_color_image(uint32_t index) const {
+            return m_images[index];
+        }
+        inline VkImageView get_color_image_view(uint32_t index) const {
+            return m_image_views[index];
         }
         inline VkImage get_color_image() const {
             return m_images[m_frame_index];
@@ -98,8 +105,6 @@ namespace Atlas {
 #endif
         bool init_surface();
         bool init_swapchain(Backend::Device* device);
-        // TODO: implement
-        bool init_framebuffers();
 
         const std::string m_name;
         // TODO: client (surface) dimensions vs window dimensions
@@ -131,8 +136,7 @@ namespace Atlas {
         std::vector<VkImageView> m_image_views;
         VkImage m_depth;
         VkImageView m_depth_view;
-        std::vector<VkFramebuffer> m_fbos;
-        std::vector<VkSemaphore> m_present_complete_semaphores;
+        std::vector<VkSemaphore> m_image_available_semaphores;
 
 
         // Surface functions

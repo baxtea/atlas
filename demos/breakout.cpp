@@ -1,6 +1,4 @@
 #include "backend.h"
-#include "window.h"
-#include <chrono>
 
 const char* vert_source = 
 "#version 430\n"
@@ -36,65 +34,16 @@ int main() {
 
     while (!window.should_close()) {
         window.handle_events();
+
+        // Logic here
+
+        window.acquire_next_frame();
+
+        // Render here
+
+        window.present();
     }
 
     // Window closes automatically on exit
     return 0;
 }
-
-/*
-struct App {
-    std::chrono::high_resolution_clock::time_point last_frame_time;
-    std::chrono::high_resolution_clock::time_point curr_frame_time;
-    std::chrono::microseconds time_elapsed;
-
-    std::shared_ptr<Atlas::Window> window;
-
-    std::unique_ptr<Camera> camera;
-
-    std::shared_ptr<Anvil::ShaderModule> vert, frag;
-
-    // Semaphores
-};
-
-void init(App& app) {
-    app.last_frame_time = std::chrono::high_resolution_clock::now();
-
-    init_vulkan(app_name);
-    app.window = std::make_shared<Atlas::Window>(app_name, 1280, 720);
-
-
-    app.vert = create_shader_module_from_source(vert_source, Anvil::SHADER_STAGE_VERTEX);
-    app.frag = create_shader_module_from_source(frag_source, Anvil::SHADER_STAGE_VERTEX);
-
-    app.camera = std::make_unique<Camera>("Camera");
-}
-
-void do_frame(App& app) {
-    app.window->handle_events();
-    app.curr_frame_time = std::chrono::high_resolution_clock::now();
-    app.time_elapsed = std::chrono::duration_cast<std::chrono::microseconds>(app.curr_frame_time - app.last_frame_time);
-    app.last_frame_time = app.curr_frame_time;
-}
-
-void shutdown(App& app) {
-    app.frag.reset();
-    app.vert.reset();
-
-    app.window.reset();
-    shutdown_vulkan();
-}
-
-int main() {
-    App app;
-
-    init(app);
-
-    while (!app.window->should_close()) {
-        do_frame(app);
-    }
-
-    shutdown(app);
-
-    return 0;
-}*/

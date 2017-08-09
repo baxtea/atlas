@@ -249,7 +249,7 @@ Window::Window(const Backend::Instance& instance, const std::string& name, uint3
 
 Window::Window(const Backend::Instance& instance, uint32_t physical_device_index, const std::string& name, uint32_t width, uint32_t height)
     : m_name(name), m_width(width), m_height(height), m_fullscreen(false), m_vsync(true)
-    , m_should_close(false), m_n_swapchain_images(3), m_instance(instance), m_device(nullptr)
+    , m_should_close(false), m_n_swapchain_images(3), m_instance(instance), m_device(nullptr), m_frame_index(0)
     , m_physical_device_index(physical_device_index), m_surface(VK_NULL_HANDLE), m_swapchain(VK_NULL_HANDLE)
     , m_depth(VK_NULL_HANDLE), m_depth_view(VK_NULL_HANDLE), vkCreateSwapchainKHR(VK_NULL_HANDLE), vkGetSwapchainImagesKHR(VK_NULL_HANDLE)
     , vkAcquireNextImageKHR(VK_NULL_HANDLE), vkQueuePresentKHR(VK_NULL_HANDLE), vkGetPhysicalDeviceFormatProperties(VK_NULL_HANDLE)
@@ -411,7 +411,11 @@ bool Window::init_swapchain(Backend::Device* device) {
     }
 
     // Swapchain image count
-    uint32_t desired_n_images = m_surface_caps.minImageCount + 1;
+    // Make sure the requested image count is within the min and max for this surface
+    uint32_t desired_n_images = m_n_swapchain_images;
+    if (desired_n_images < m_surface_caps.minImageCount) {
+        desired_n_images = m_surface_caps.minImageCount;
+    }
     if ( (m_surface_caps.maxImageCount > 0) && (desired_n_images > m_surface_caps.maxImageArrayLayers) ) {
         // Be safe in the case where min = max, and min + 1 is no good
         desired_n_images = m_surface_caps.maxImageCount;
@@ -425,7 +429,7 @@ bool Window::init_swapchain(Backend::Device* device) {
     }
 
     // Find a supported composite alpha format
-    VkCompositeAlphaFlagBitsKHR composite_alpha;
+    VkCompositeAlphaFlagBitsKHR composite_alpha = VK_COMPOSITE_ALPHA_FLAG_BITS_MAX_ENUM_KHR;
     const std::array<VkCompositeAlphaFlagBitsKHR, 4> preferred_alphas = {
         VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
@@ -437,6 +441,10 @@ bool Window::init_swapchain(Backend::Device* device) {
             composite_alpha = alpha;
             break;
         }
+    }
+    if (composite_alpha == VK_COMPOSITE_ALPHA_FLAG_BITS_MAX_ENUM_KHR) {
+        Backend::error("Could not find a supported composite alpha for the presentation surface!");
+        return false;
     }
 
     // Set an additional usage flag for blitting with the swapchain images if supported
@@ -485,12 +493,12 @@ bool Window::init_swapchain(Backend::Device* device) {
     }
 
     // Get the swapchain images
-    uint32_t n_images;
-    res = vkGetSwapchainImagesKHR(device->vk(), m_swapchain, &n_images, nullptr);
+    res = vkGetSwapchainImagesKHR(device->vk(), m_swapchain, &m_n_swapchain_images, nullptr);
     if (!validate(res)) return false;
-    m_images.resize(n_images);
-    m_image_views.resize(n_images);
-    res = vkGetSwapchainImagesKHR(device->vk(), m_swapchain, &n_images, m_images.data());
+    m_images.resize(m_n_swapchain_images);
+    m_image_views.resize(m_n_swapchain_images);
+    m_image_available_semaphores.resize(m_n_swapchain_images);
+    res = vkGetSwapchainImagesKHR(device->vk(), m_swapchain, &m_n_swapchain_images, m_images.data());
     if (!validate(res)) return false;
 
 
@@ -502,7 +510,7 @@ bool Window::init_swapchain(Backend::Device* device) {
         0,                          // baseArrayLayer
         1                           // layerCount
     };
-    VkImageViewCreateInfo attachment_view = {
+    VkImageViewCreateInfo color_view_info = {
         VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,   // sType
         nullptr,                                    // pNext
         0,                                          // flags
@@ -514,11 +522,16 @@ bool Window::init_swapchain(Backend::Device* device) {
             VK_COMPONENT_SWIZZLE_B,
             VK_COMPONENT_SWIZZLE_A
         },                                          // components
-        subresource_range                           // subresourceRange
+        {   VK_IMAGE_ASPECT_COLOR_BIT,              // aspectMask
+            0,                                      // baseMipLevel
+            1,                                      // levelCount
+            0,                                      // baseArrayLayer
+            1                                       // layerCount
+        }                                           // subresourceRange
     };
-    for (uint32_t i = 0; i < n_images; ++i) {
-        attachment_view.image = m_images[i];
-        res = vkCreateImageView(device->vk(), &attachment_view, nullptr, &m_image_views[i]);
+    for (uint32_t i = 0; i < m_n_swapchain_images; ++i) {
+        color_view_info.image = m_images[i];
+        res = vkCreateImageView(device->vk(), &color_view_info, nullptr, &m_image_views[i]);
         if (!validate(res)) return false;
     }
 
@@ -627,11 +640,20 @@ bool Window::init_swapchain(Backend::Device* device) {
     };
 
     res = vkCreateImageView(m_device->vk(), &depth_view_info, nullptr, &m_depth_view);
+    if (!validate(res)) return false;
 
-    return validate(res);
-}
 
-bool Window::init_framebuffers() {
+    // Create semaphores to signal when presentation is complete
+    VkSemaphoreCreateInfo semaphore_info = {
+        VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,    // sType
+        nullptr,                                    // pNext
+        0                                           // flags
+    };
+    for (uint32_t i = 0; i < m_n_swapchain_images; ++i) {
+        res = vkCreateSemaphore(device->vk(), &semaphore_info, nullptr, &m_image_available_semaphores[i]);
+        if (!validate(res)) return false;
+    }
+
     return true;
 }
 
@@ -646,28 +668,6 @@ bool Window::init() {
         return init_xcb() && init_surface();
 #   endif
 }
-
-/*
-void Window::init_framebuffers() {
-    bool result;
-
-    for (uint32_t n_swapchain_image = 0;
-                  n_swapchain_image < m_n_swapchain_images;
-                ++n_swapchain_image)
-    {
-        m_framebuffers[n_swapchain_image] = Anvil::Framebuffer::create(
-            g_device,
-            m_width, m_height,
-            1); // n_layers
-
-        m_framebuffers[n_swapchain_image]->set_name_formatted("Framebuffer used to render to swapchain image [%d]",
-            n_swapchain_image);
-
-        result = m_framebuffers[n_swapchain_image]->add_attachment(m_swapchain->get_image_view(n_swapchain_image),
-            nullptr); // out_opt_attachment_id_ptrs
-        anvil_assert(result);
-    }
-}*/
 
 void Window::handle_events() {
 #if _WIN32
@@ -685,4 +685,25 @@ void Window::close() {
     xcb_destroy_window(xcb->connection, xcb->window);
     xcb->window = 0;
 #endif
+}
+
+bool Window::acquire_next_frame(uint64_t timeout, VkFence fence) {
+    return validate( vkAcquireNextImageKHR(m_device->vk(), m_swapchain, timeout, m_image_available_semaphores[m_frame_index], fence, &m_frame_index) );
+}
+
+bool Window::present(const std::vector<VkSemaphore> wait_semaphores) {
+    std::string msg = "Presenting frame ";
+    msg += m_frame_index;
+    Backend::log(msg);
+    VkPresentInfoKHR present_info = {
+        VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, // sType
+        nullptr,                            // pNext
+        static_cast<uint32_t>(wait_semaphores.size()), // waitSemaphoreCount
+        wait_semaphores.data(),             // pWaitSemaphores
+        1,                                  // swapchainCount
+        &m_swapchain,                       // pSwapchains
+        &m_frame_index,                     // pImageIndices
+        nullptr                             // pResults
+    };
+    return validate( vkQueuePresentKHR(m_present_queue, &present_info) );
 }
