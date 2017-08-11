@@ -153,7 +153,7 @@ void Window::handle_xcb_events() {
             && ((cfg_event->width != m_width) || (cfg_event->height != m_height))  ) {
                 m_desired_width = cfg_event->width;
                 m_desired_height = cfg_event->height;
-                m_flags |= swapchain_is_old;
+                m_flags |= surface_changed;
             }
         }
 /*
@@ -216,13 +216,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if ( (m_flags & resizing) || ((wParam == SIZE_MAXIMIZED) || (wParam == SIZE_RESTORED)) ) {
                 m_desired_width = LOWORD(lParam);
                 m_desired_height = HIWORD(lParam);
-                m_flags |= swapchain_is_old;
+                m_flags |= surface_changed;
             }
         }
             && ((cfg_event->width != m_width) || (cfg_event->height != m_height))  ) {
                 m_desired_width = cfg_event->width;
                 m_desired_height = cfg_event->height;
-                m_flags |= swapchain_is_old;
+                m_flags |= surface_changed;
             }
         break;
     case WM_ENTERSIZEMOVE:
@@ -323,8 +323,9 @@ Window::Window(const Backend::Instance& instance, const std::string& name, uint3
 
 Window::Window(const Backend::Instance& instance, uint32_t physical_device_index, const std::string& name, uint32_t width, uint32_t height)
     : m_name(name), m_width(width), m_height(height), m_flags(0), m_n_swapchain_images(3), m_frame_index(0), m_desired_width(width), m_desired_height(height)
-    , m_instance(instance), m_device(nullptr), m_physical_device_index(physical_device_index), m_surface(VK_NULL_HANDLE), m_swapchain(VK_NULL_HANDLE)
-    , m_depth(VK_NULL_HANDLE), m_depth_view(VK_NULL_HANDLE), vkCreateSwapchainKHR(VK_NULL_HANDLE), vkGetSwapchainImagesKHR(VK_NULL_HANDLE)
+    , m_color_format(VK_FORMAT_UNDEFINED), m_depth_format(VK_FORMAT_UNDEFINED), m_color_space(VK_COLOR_SPACE_MAX_ENUM_KHR), m_instance(instance), m_device(nullptr)
+    , m_physical_device_index(physical_device_index), m_surface(VK_NULL_HANDLE), m_swapchain(VK_NULL_HANDLE), m_depth(VK_NULL_HANDLE), m_depth_view(VK_NULL_HANDLE)
+    , vkCreateSwapchainKHR(VK_NULL_HANDLE), vkGetSwapchainImagesKHR(VK_NULL_HANDLE), vkCreateFramebuffer(VK_NULL_HANDLE), vkDestroyFramebuffer(VK_NULL_HANDLE)
     , vkAcquireNextImageKHR(VK_NULL_HANDLE), vkQueuePresentKHR(VK_NULL_HANDLE), vkGetPhysicalDeviceFormatProperties(VK_NULL_HANDLE)
 {
     // Surface functions
@@ -427,6 +428,30 @@ bool Window::init_surface() {
         return false;
     }
 
+    // Get preferred color format
+    if ( (m_surface_formats.size() == 1) && (m_surface_formats[0].format == VK_FORMAT_UNDEFINED) ) {
+        // There is no preferred format, so assume VK_FORMAT_B8G8R8A8_UNORM
+        m_color_format = VK_FORMAT_B8G8R8A8_UNORM;
+        m_color_space = m_surface_formats[0].colorSpace;
+    }
+    else {
+        // Iterate over the list of available surface formats and look for VK_FORMAT_B8G8R8A8_UNORM
+        bool found_B8G8R8A8_UNORM = false;
+        for (const auto& format : m_surface_formats) {
+            if (format.format == VK_FORMAT_B8G8R8A8_UNORM) {
+                m_color_format = format.format;
+                m_color_space = format.colorSpace;
+                found_B8G8R8A8_UNORM = true;
+                break;
+            }
+        }
+        // If it is not available, select the first available color format
+        if (!found_B8G8R8A8_UNORM) {
+            m_color_format = m_surface_formats[0].format;
+            m_color_space = m_surface_formats[0].colorSpace;
+        }
+    }
+
     return true;
 }
 
@@ -440,32 +465,6 @@ bool Window::init_swapchain(Backend::Device* device) {
     // If we don't make the new swapchain a derivative of the old one, all the resources have to be reloaded
     // (which is obviously too much for changing vsync)
     VkSwapchainKHR old_swapchain = m_swapchain;
-
-    // Get preferred formats
-    VkFormat color_format;
-    VkColorSpaceKHR color_space;
-    if ( (m_surface_formats.size() == 1) && (m_surface_formats[0].format == VK_FORMAT_UNDEFINED) ) {
-        // There is no preferred format, so assume VK_FORMAT_B8G8R8A8_UNORM
-        color_format = VK_FORMAT_B8G8R8A8_UNORM;
-        color_space = m_surface_formats[0].colorSpace;
-    }
-    else {
-        // Iterate over the list of available surface formats and look for VK_FORMAT_B8G8R8A8_UNORM
-        bool found_B8G8R8A8_UNORM = false;
-        for (const auto& format : m_surface_formats) {
-            if (format.format == VK_FORMAT_B8G8R8A8_UNORM) {
-                color_format = format.format;
-                color_space = format.colorSpace;
-                found_B8G8R8A8_UNORM = true;
-                break;
-            }
-        }
-        // If it is not available, select the first available color format
-        if (!found_B8G8R8A8_UNORM) {
-            color_format = m_surface_formats[0].format;
-            color_space = m_surface_formats[0].colorSpace;
-        }
-    }
 
     // Image size
     VkExtent2D extent;
@@ -536,7 +535,7 @@ bool Window::init_swapchain(Backend::Device* device) {
     // Set an additional usage flag for blitting with the swapchain images if supported
     VkImageUsageFlags image_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     VkFormatProperties format_props;
-    vkGetPhysicalDeviceFormatProperties(m_instance.get_physical_device(m_physical_device_index).device, color_format, &format_props);
+    vkGetPhysicalDeviceFormatProperties(m_instance.get_physical_device(m_physical_device_index).device, m_color_format, &format_props);
     if (format_props.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT) {
         image_usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     }
@@ -551,8 +550,8 @@ bool Window::init_swapchain(Backend::Device* device) {
         0,                                              // flags
         m_surface,                                      // surface
         desired_n_images,                               // minImageCount
-        color_format,                                   // imageFormat
-        color_space,                                    // imageColorSpace
+        m_color_format,                                   // imageFormat
+        m_color_space,                                    // imageColorSpace
         extent,                                         // imageExtent
         1,                                              // imageArrayLayers
         image_usage,                                    // imageUsage
@@ -606,7 +605,7 @@ bool Window::init_swapchain(Backend::Device* device) {
         0,                                          // flags
         VK_NULL_HANDLE,                             // image
         VK_IMAGE_VIEW_TYPE_2D,                      // viewType
-        color_format,                               // format
+        m_color_format,                               // format
         {   VK_COMPONENT_SWIZZLE_R,
             VK_COMPONENT_SWIZZLE_G,
             VK_COMPONENT_SWIZZLE_B,
@@ -639,30 +638,29 @@ bool Window::init_swapchain(Backend::Device* device) {
         VK_FORMAT_D16_UNORM
     };
 
-    VkFormat depth_format = VK_FORMAT_UNDEFINED;
     VkImageTiling depth_tiling;
     VkFormatProperties format_properties;
     // Ideally, use a format which supports a depth/stencil attachment with optimal tiling
     for (const auto& format : depth_formats) {
         vkGetPhysicalDeviceFormatProperties(m_device->get_physical_device().device, format, &format_properties);
         if (format_properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
-            depth_format = format;
+            m_depth_format = format;
             depth_tiling = VK_IMAGE_TILING_OPTIMAL;
             break;
         }
     }
     // Resort to linear tiling if it's the only one that supports a depth/stencil attachment
-    if (depth_format == VK_FORMAT_UNDEFINED) {
+    if (m_depth_format == VK_FORMAT_UNDEFINED) {
         for (const auto& format : depth_formats) {
             vkGetPhysicalDeviceFormatProperties(m_device->get_physical_device().device, format, &format_properties);
             if (format_properties.linearTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
-                depth_format = format;
+                m_depth_format = format;
                 depth_tiling = VK_IMAGE_TILING_OPTIMAL;
                 break;
             }
         }
     }
-    if (depth_format == VK_FORMAT_UNDEFINED) {
+    if (m_depth_format == VK_FORMAT_UNDEFINED) {
         Backend::error("No tiling formats support a depth/stencil attachment!");
         return false;
     }
@@ -673,7 +671,7 @@ bool Window::init_swapchain(Backend::Device* device) {
         nullptr,                                        // pNext
         0,                                              // flags
         VK_IMAGE_TYPE_2D,                               // imageType
-        depth_format,                                   // format
+        m_depth_format,                                   // format
         {   extent.width,                               // extent
             extent.height,
             1
@@ -705,7 +703,7 @@ bool Window::init_swapchain(Backend::Device* device) {
         VK_FORMAT_D32_SFLOAT_S8_UINT,
         VK_FORMAT_S8_UINT
     };
-    if (std::find(stencil_formats.begin(), stencil_formats.end(), depth_format) != stencil_formats.end())
+    if (std::find(stencil_formats.begin(), stencil_formats.end(), m_depth_format) != stencil_formats.end())
         aspect_mask |= VK_IMAGE_ASPECT_STENCIL_BIT;
     
 
@@ -715,7 +713,7 @@ bool Window::init_swapchain(Backend::Device* device) {
         0,                                          // flags
         m_depth,                                    // image
         VK_IMAGE_VIEW_TYPE_2D,                      // viewType
-        depth_format,                               // format
+        m_depth_format,                               // format
         {   VK_COMPONENT_SWIZZLE_R,
             VK_COMPONENT_SWIZZLE_G,
             VK_COMPONENT_SWIZZLE_B,
@@ -744,6 +742,33 @@ bool Window::init_swapchain(Backend::Device* device) {
         if (!validate(res)) return false;
     }
 
+    return true;
+}
+
+bool Window::init_framebuffers(const Backend::RenderPass& renderpass, const std::vector<VkImageView>& attachments_in) {
+    std::vector<VkImageView> attachments(attachments_in.size() + 2);
+    attachments[1] = m_depth_view;
+    std::vector<VkImageView>::iterator copy_start = attachments.begin();
+    std::advance(copy_start, 2);
+    std::copy(attachments_in.begin(), attachments_in.end(), copy_start);
+
+    VkFramebufferCreateInfo framebufferInfo = {};
+    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    framebufferInfo.renderPass = renderpass.vk();
+    framebufferInfo.attachmentCount = 2;
+    framebufferInfo.width = m_width;
+    framebufferInfo.height = m_height;
+    framebufferInfo.layers = 1;
+
+    m_framebuffers.resize(m_n_swapchain_images);
+
+    for (size_t i = 0; i < m_n_swapchain_images; i++) {
+        attachments[0] = m_image_views[i];
+        framebufferInfo.pAttachments = attachments.data();
+
+        if (!validate(vkCreateFramebuffer(m_device->vk(), &framebufferInfo, nullptr, &m_framebuffers[i])))
+            return false;
+    }
     return true;
 }
 
@@ -776,7 +801,7 @@ void Window::close() {
 bool Window::acquire_next_frame(uint64_t timeout, VkFence fence) {
     VkResult res = vkAcquireNextImageKHR(m_device->vk(), m_swapchain, timeout, m_image_available_semaphores[m_frame_index], fence, &m_frame_index);
     if ((res == VK_SUBOPTIMAL_KHR) || (res == VK_ERROR_OUT_OF_DATE_KHR))
-        m_flags |= swapchain_is_old;
+        m_flags |= surface_changed;
     return validate(res);
 }
 
@@ -838,7 +863,7 @@ bool Window::set_fullscreen(bool full) {
 
     if (xcb->window && xcb->connection) {
         if ( full != (m_flags & current_fullscreen) ) { // If fullscreen requested, and currently windowed; or if windowed requested and currently fullscreen
-            xcb_void_cookie_t err_cookie = xcb_send_event_checked (xcb->connection, 1, xcb->screen->root, XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY, reinterpret_cast<const char*>(&ev));
+            xcb_void_cookie_t err_cookie = xcb_send_event_checked (xcb->connection, 1, xcb->window, XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY, reinterpret_cast<const char*>(&ev));
             xcb_generic_error_t* err = xcb_request_check(xcb->connection, err_cookie);
             if (err != NULL)  {
                 std::string err_string = "Could not toggle fullscreen! X11 error code " + err->error_code;
@@ -861,12 +886,20 @@ bool Window::set_fullscreen(bool full) {
 #endif
 }
 
-bool Window::recreate_swapchain() {
-    Backend::log("Recreating swapchain...");
-    m_width = m_desired_width;
-    m_height = m_desired_height;
-    m_flags &= (~swapchain_is_old);
+bool Window::rebuild(const Backend::RenderPass& renderpass, const std::vector<VkImageView>& attachments) {
+    if (m_device) {
+        m_width = m_desired_width;
+        m_height = m_desired_height;
+        m_flags &= (~surface_changed);
 
-    vkDeviceWaitIdle(m_device->vk());
-    return init_swapchain(m_device);
+        vkDeviceWaitIdle(m_device->vk());
+
+        for (auto iter = m_framebuffers.rbegin(); iter != m_framebuffers.rend(); ++iter) {
+            if (*iter)
+                vkDestroyFramebuffer(m_device->vk(), *iter, nullptr);
+        }
+
+        return init_swapchain(m_device) && init_framebuffers(renderpass, attachments);
+    }
+    else return false;
 }

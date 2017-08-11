@@ -607,11 +607,13 @@ bool Device::init() {
     m_window.vkAcquireNextImageKHR = reinterpret_cast<PFN_vkAcquireNextImageKHR>( vkGetDeviceProcAddr(m_device, "vkAcquireNextImageKHR") );
     m_window.vkQueuePresentKHR = reinterpret_cast<PFN_vkQueuePresentKHR>( vkGetDeviceProcAddr(m_device, "vkQueuePresentKHR") );
     m_window.vkCreateSemaphore = reinterpret_cast<PFN_vkCreateSemaphore>( vkGetDeviceProcAddr(m_device, "vkCreateSemaphore") );
+    m_window.vkCreateFramebuffer = reinterpret_cast<PFN_vkCreateFramebuffer>( vkGetDeviceProcAddr(m_device, "vkCreateFramebuffer") );
     // The destroy functions are also stored there, even though they are called in *our* destructor
     // If the window needs to call them in recreate_swapchain, it needs access to them
-    m_window.vkDestroySemaphore = reinterpret_cast<PFN_vkDestroySemaphore>( vkGetDeviceProcAddr(m_device, "vkDestroySemaphore") );
     m_window.vkDestroyImageView = reinterpret_cast<PFN_vkDestroyImageView>( vkGetDeviceProcAddr(m_device, "vkDestroyImageView") );
     m_window.vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>( vkGetDeviceProcAddr(m_device, "vkDestroySwapchainKHR") );
+    m_window.vkDestroySemaphore = reinterpret_cast<PFN_vkDestroySemaphore>( vkGetDeviceProcAddr(m_device, "vkDestroySemaphore") );
+    m_window.vkDestroyFramebuffer = reinterpret_cast<PFN_vkDestroyFramebuffer>( vkGetDeviceProcAddr(m_device, "vkDestroyFramebuffer") );
 
     // Oh and make sure to initialize the window's swapchain, now that we have a device
     if (!m_window.init_swapchain(this)) return false;
@@ -620,7 +622,13 @@ bool Device::init() {
 }
 
 Device::~Device() {
+    vkDeviceWaitIdle(m_device);
     // Release the resources that windows can't do themselves (since the device will be invalid before their destructor)
+    for (auto iter = m_window.m_framebuffers.rbegin(); iter != m_window.m_framebuffers.rend(); ++iter) {
+        if (*iter)
+            m_window.vkDestroyFramebuffer(m_device, *iter, nullptr);
+    }
+
     for (auto iter = m_window.m_image_available_semaphores.rbegin(); iter != m_window.m_image_available_semaphores.rend(); ++iter) {
         if (*iter)
             m_window.vkDestroySemaphore(m_device, *iter, nullptr);
@@ -654,4 +662,73 @@ Device::~Device() {
 
 bool Device::is_extension_supported(const std::string& name) const {
     return (m_supported_extensions.find(name) != m_supported_extensions.end());
+}
+
+//
+//
+// Render pass
+//
+//
+
+
+RenderPass::RenderPass(Backend::Device& device)
+ : m_device(device), m_renderpass(VK_NULL_HANDLE) {
+    vkCreateRenderPass = reinterpret_cast<PFN_vkCreateRenderPass>( vkGetDeviceProcAddr(device.vk(), "vkCreateRenderPass") );
+    vkDestroyRenderPass = reinterpret_cast<PFN_vkDestroyRenderPass>( vkGetDeviceProcAddr(device.vk(), "vkDestroyRenderPass") );
+}
+
+uint32_t RenderPass::add_attachment(VkFormat format, VkImageLayout initial_layout, VkImageLayout final_layout, VkAttachmentLoadOp load_op, VkAttachmentStoreOp store_op, VkSampleCountFlagBits n_samples, bool uses_shared_memory) {
+    // Check if the sample count is supported
+    VkSampleCountFlags supported_n_samples = std::min(m_device.get_physical_device().props.limits.framebufferColorSampleCounts, m_device.get_physical_device().props.limits.framebufferDepthSampleCounts);
+    if (!(supported_n_samples & n_samples)) {
+        Backend::error("Failed to add an attachment (requested an unsupported sample count)!");
+        return std::numeric_limits<uint32_t>::max();
+    }
+
+    VkAttachmentDescription desc = {
+        uses_shared_memory ? VK_ATTACHMENT_DESCRIPTION_MAY_ALIAS_BIT : 0u,   // flags
+        format,                             // format
+        n_samples,                          // samples
+        load_op,                            // loadOp
+        store_op,                           // storeOp
+        VK_ATTACHMENT_LOAD_OP_DONT_CARE,    // stencilLoadOp
+        VK_ATTACHMENT_STORE_OP_DONT_CARE,   // stencilStoreOp
+        initial_layout,                     // initialLayout
+        final_layout                        // finalLayout
+    };
+    m_attachments.push_back(desc);
+    return m_attachments.size() - 1;
+}
+
+uint32_t RenderPass::add_subpass(VkSubpassDescription subpass) {
+    m_subpasses.push_back(subpass);
+    return m_subpasses.size() - 1;
+}
+
+void RenderPass::add_dependency(VkSubpassDependency deps) {
+    m_dependencies.push_back(deps);
+}
+
+void RenderPass::enable_attachment_stencil(uint32_t index, VkAttachmentLoadOp load_op, VkAttachmentStoreOp store_op) {
+    m_attachments[index].stencilLoadOp = load_op;
+    m_attachments[index].stencilStoreOp = store_op;
+}
+
+bool RenderPass::init() {
+    VkRenderPassCreateInfo rp_info = {
+        VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,  // sType
+        nullptr,                                    // pNext
+        0,                                          // flags
+        static_cast<uint32_t>(m_attachments.size()),// attachmentCount
+        m_attachments.data(),                       // pAttachments
+        static_cast<uint32_t>(m_subpasses.size()),  // subpassCount
+        m_subpasses.data(),                         // pSubpasses
+    };
+
+    return validate(vkCreateRenderPass(m_device.vk(), &rp_info, nullptr, &m_renderpass));
+}
+
+RenderPass::~RenderPass() {
+    if (m_renderpass)
+        vkDestroyRenderPass(m_device.vk(), m_renderpass, nullptr);
 }

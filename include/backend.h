@@ -162,20 +162,53 @@ namespace Atlas {
             uint32_t m_queue_flags;
         };
 
+        struct RenderPass {
+            RenderPass(Backend::Device& device);
+            ~RenderPass();
+            bool init();
+
+            // Returns the index of the attachment
+            uint32_t add_attachment(VkFormat format, VkImageLayout initial_layout, VkImageLayout final_layout, VkAttachmentLoadOp load_op, VkAttachmentStoreOp store_op, VkSampleCountFlagBits n_samples = VK_SAMPLE_COUNT_1_BIT, bool uses_shared_memory = false);
+            void enable_attachment_stencil(uint32_t index, VkAttachmentLoadOp load_op, VkAttachmentStoreOp store_op);
+            uint32_t add_subpass(VkSubpassDescription subpass);
+            void add_dependency(VkSubpassDependency deps);
+
+            inline VkRenderPass vk() const {
+                return m_renderpass;
+            }
+            inline uint32_t n_attachments() const {
+                return static_cast<uint32_t>(m_attachments.size());
+            }
+        protected:
+            Backend::Device& m_device;
+            VkRenderPass m_renderpass;
+            std::vector<VkAttachmentDescription> m_attachments;
+            std::vector<VkSubpassDescription> m_subpasses;
+            std::vector<VkSubpassDependency> m_dependencies;
+            PFN_vkCreateRenderPass vkCreateRenderPass;
+            PFN_vkDestroyRenderPass vkDestroyRenderPass;
+        };
+
+        struct Framebuffer {
+            uint32_t add_attachment(VkImageView view);
+        };
+
+        // TODO: Add support for secondary command buffers
         struct CommandBuffer {
             // Create a primary command buffer
-            CommandBuffer(const Device& device);
-            // Create a secondary command buffer
-            CommandBuffer(const Device& device, const CommandBuffer& primary);
+            CommandBuffer(const Device& device, QueueFamily queue_family, uint32_t thread_index);//, VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+            ~CommandBuffer();
 
+            bool init();
 
-            void submit();
+            inline VkCommandBuffer vk() const {
+                return m_buffer;
+            }
         
         protected:
-            VkCommandPool m_parent;
             VkQueue m_queue;
             VkCommandBuffer m_buffer;
-        };
+        }
     }
 }
 

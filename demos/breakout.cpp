@@ -33,16 +33,52 @@ int main() {
     Backend::Device device(window);
     if (!device.init()) return 1;
 
+
+    Backend::RenderPass renderpass(device);
+    uint32_t color_index = renderpass.add_attachment(window.get_color_format(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE);
+    uint32_t depth_index = renderpass.add_attachment(window.get_depth_format(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_DONT_CARE);
+    
+    VkAttachmentReference color_ref = { color_index, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+    VkAttachmentReference depth_ref = { depth_index, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+    VkSubpassDescription subpass = {};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &color_ref;
+    subpass.pDepthStencilAttachment = &depth_ref;
+    uint32_t subpass_index = renderpass.add_subpass(subpass);
+
+    VkSubpassDependency load_deps = {};
+    load_deps.srcSubpass = VK_SUBPASS_EXTERNAL;
+    load_deps.dstSubpass = subpass_index;
+    load_deps.srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;			
+    load_deps.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;	
+    load_deps.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    load_deps.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    load_deps.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+    renderpass.add_dependency(load_deps);
+    VkSubpassDependency store_deps = {};
+    store_deps.srcSubpass = subpass_index;
+    store_deps.dstSubpass = VK_SUBPASS_EXTERNAL;
+    store_deps.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;	
+    store_deps.dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    store_deps.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    store_deps.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    store_deps.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+    renderpass.add_dependency(store_deps);
+
+    if (!renderpass.init()) return 1;
+    // TODO: framebuffers don't work correctly in fullscreen (at least with xcb)
+    if (!window.init_framebuffers(renderpass)) return 1;
+
     while (!window.should_close()) {
         window.handle_events();
 
         // Logic here
 
         window.acquire_next_frame();
-        if (window.should_recreate_swapchain()) {
+        if (window.should_rebuild()) {
             bool success = true;
-            success &= window.recreate_swapchain();
-            // success &= framebuffer.recreate();
+            success &= window.rebuild(renderpass);
             // success &= rebuild_command_buffers();
             // camera.update_aspect_ratio()
             if (!success) return 1;
