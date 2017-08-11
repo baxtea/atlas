@@ -607,10 +607,11 @@ bool Device::init() {
     m_window.vkAcquireNextImageKHR = reinterpret_cast<PFN_vkAcquireNextImageKHR>( vkGetDeviceProcAddr(m_device, "vkAcquireNextImageKHR") );
     m_window.vkQueuePresentKHR = reinterpret_cast<PFN_vkQueuePresentKHR>( vkGetDeviceProcAddr(m_device, "vkQueuePresentKHR") );
     m_window.vkCreateSemaphore = reinterpret_cast<PFN_vkCreateSemaphore>( vkGetDeviceProcAddr(m_device, "vkCreateSemaphore") );
-    // But the destroy functions are stored here, since they are called in *our* destructor
-    vkDestroySemaphore = reinterpret_cast<PFN_vkDestroySemaphore>( vkGetDeviceProcAddr(m_device, "vkDestroySemaphore") );
-    vkDestroyImageView = reinterpret_cast<PFN_vkDestroyImageView>( vkGetDeviceProcAddr(m_device, "vkDestroyImageView") );
-    vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>( vkGetDeviceProcAddr(m_device, "vkDestroySwapchainKHR") );
+    // The destroy functions are also stored there, even though they are called in *our* destructor
+    // If the window needs to call them in recreate_swapchain, it needs access to them
+    m_window.vkDestroySemaphore = reinterpret_cast<PFN_vkDestroySemaphore>( vkGetDeviceProcAddr(m_device, "vkDestroySemaphore") );
+    m_window.vkDestroyImageView = reinterpret_cast<PFN_vkDestroyImageView>( vkGetDeviceProcAddr(m_device, "vkDestroyImageView") );
+    m_window.vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>( vkGetDeviceProcAddr(m_device, "vkDestroySwapchainKHR") );
 
     // Oh and make sure to initialize the window's swapchain, now that we have a device
     if (!m_window.init_swapchain(this)) return false;
@@ -622,19 +623,19 @@ Device::~Device() {
     // Release the resources that windows can't do themselves (since the device will be invalid before their destructor)
     for (auto iter = m_window.m_image_available_semaphores.rbegin(); iter != m_window.m_image_available_semaphores.rend(); ++iter) {
         if (*iter)
-            vkDestroySemaphore(m_device, *iter, nullptr);
+            m_window.vkDestroySemaphore(m_device, *iter, nullptr);
     }
     if (m_window.m_depth_view)
-        vkDestroyImageView(m_device, m_window.m_depth_view, nullptr);
+        m_window.vkDestroyImageView(m_device, m_window.m_depth_view, nullptr);
     if (m_window.m_depth)
         vmaDestroyImage(m_allocator, m_window.m_depth);
 
     if (m_window.m_swapchain) {
         for (auto view = m_window.m_image_views.rbegin(); view != m_window.m_image_views.rend(); ++view) {
             if (*view)
-                vkDestroyImageView(m_device, *view, NULL);
+                m_window.vkDestroyImageView(m_device, *view, NULL);
         }
-        vkDestroySwapchainKHR(m_device, m_window.m_swapchain, nullptr);
+        m_window.vkDestroySwapchainKHR(m_device, m_window.m_swapchain, nullptr);
     }
 
     for (auto iter = m_command_pools.rbegin(); iter != m_command_pools.rend(); ++iter) {

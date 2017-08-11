@@ -33,27 +33,31 @@ namespace Atlas {
         bool init();
         void close();
 
-        void set_fullscreen(bool full);
-        inline bool is_fullscreen() const {
-            return m_fullscreen;
+        bool set_fullscreen(bool full);
+        inline bool get_fullscreen() const {
+            return (m_flags & current_fullscreen);
+        }
+        inline void toggle_fullscreen() {
+            set_vsync(!get_fullscreen());
         }
 
         void handle_events();
         inline bool should_close() const {
-            return m_should_close;
+            return (m_flags & request_close);
         }
-        inline void set_should_close(bool request_close) {
-            m_should_close = request_close;
+        inline void set_should_close(bool close) {
+            if (close)
+                m_flags |= request_close;
+            else
+                m_flags &= (~request_close);
         }
-
-        // If the surface type permits it, recreate the swapchain with a different number of backbuffers
-        // vsync + double buffered => no tearing, no vsync + double buffered => tearing
-        // vsync + triple buffered => no tearing, no vsync + triple buffered => no tearing (when supported. depends on gpu capabilities)
-        bool set_triple_buffered(bool enable);
 
         void set_vsync(bool enable);
         inline bool get_vsync() const {
-            return m_vsync;
+            return (m_flags & vsync);
+        }
+        inline void toggle_vsync() {
+            set_vsync(!get_vsync());
         }
 
         //
@@ -62,35 +66,44 @@ namespace Atlas {
         bool present(const std::vector<VkSemaphore> semaphores_wait_before_presenting = {});
 
         // Probably asynchronous, but the spec doesn't guarantee it
+        // Returns 
         bool acquire_next_frame(uint64_t timeout = std::numeric_limits<uint64_t>::max(), VkFence fence_signal_when_done = VK_NULL_HANDLE);
 
-        inline VkSemaphore get_image_available_semaphore() const {
-            return m_image_available_semaphores[m_frame_index];
+
+        inline bool should_recreate_swapchain() const {
+            return (m_flags & swapchain_is_old);
+        }
+        bool recreate_swapchain();
+
+
+        inline uint32_t get_frame_index() const {
+            return m_frame_index;
         }
         inline VkSemaphore get_image_available_semaphore(uint32_t index) const {
             return m_image_available_semaphores[index];
         }
-
         inline VkImage get_color_image(uint32_t index) const {
             return m_images[index];
         }
         inline VkImageView get_color_image_view(uint32_t index) const {
             return m_image_views[index];
         }
+        
         inline VkImage get_color_image() const {
             return m_images[m_frame_index];
         }
         inline VkImageView get_color_image_view() const {
             return m_image_views[m_frame_index];
         }
+        inline VkSemaphore get_image_available_semaphore() const {
+            return m_image_available_semaphores[m_frame_index];
+        }
+
         inline VkImage get_depth_image() const {
             return m_depth;
         }
         inline VkImageView get_depth_image_view() const {
             return m_depth_view;
-        }
-        inline uint32_t get_frame_index() const {
-            return m_frame_index;
         }
     protected:
         friend struct Backend::Device;
@@ -107,9 +120,8 @@ namespace Atlas {
         bool init_swapchain(Backend::Device* device);
 
         const std::string m_name;
-        // TODO: client (surface) dimensions vs window dimensions
         uint32_t m_width, m_height;
-
+        uint32_t m_desired_width, m_desired_height;
 
         struct xcb_info;
         struct win32_info;
@@ -158,10 +170,22 @@ namespace Atlas {
         PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
         PFN_vkQueuePresentKHR vkQueuePresentKHR;
         PFN_vkCreateSemaphore vkCreateSemaphore;
+        // Deleters
+        PFN_vkDestroySemaphore vkDestroySemaphore;
+        PFN_vkDestroyImageView vkDestroyImageView;
+        PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
 
-        bool m_fullscreen;
-        bool m_should_close;
-        bool m_vsync;
+        uint32_t m_flags;
+        static constexpr uint32_t request_fullscreen = 1 << 0;
+        static constexpr uint32_t current_fullscreen = 1 << 1;
+        static constexpr uint32_t request_close = 1 << 2;
+        static constexpr uint32_t swapchain_is_old = 1 << 3;
+        static constexpr uint32_t vsync = 1 << 4;
+        static constexpr uint32_t resizing = 1 << 5;
+        // Used in update_fullscreen
+        static constexpr uint32_t _NET_WM_STATE_REMOVE = 0; // Remove/unset property
+        static constexpr uint32_t _NET_WM_STATE_ADD = 1;    // Add/set property
+        static constexpr uint32_t _NET_WM_STATE_TOGGLE = 2; // Toggle property (unused)
     };
 }
 

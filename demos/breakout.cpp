@@ -27,6 +27,7 @@ int main() {
     if (!instance.init()) return 1;
 
     Window window(instance, app_name, 1280, 720);
+    //if (!window.set_fullscreen(true)) return 1;
     if (!window.init()) return 1;
 
     Backend::Device device(window);
@@ -38,6 +39,14 @@ int main() {
         // Logic here
 
         window.acquire_next_frame();
+        if (window.should_recreate_swapchain()) {
+            bool success = true;
+            success &= window.recreate_swapchain();
+            // success &= framebuffer.recreate();
+            // success &= rebuild_command_buffers();
+            // camera.update_aspect_ratio()
+            if (!success) return 1;
+        }
 
         // Render here
 

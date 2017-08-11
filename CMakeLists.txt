@@ -47,7 +47,7 @@ target_compile_definitions(atlas PUBLIC
 if (WIN32)
     target_link_libraries(atlas ${Vulkan_LIBRARY})
 else()
-    target_link_libraries(atlas ${Vulkan_LIBRARY} dl xcb)
+    target_link_libraries(atlas ${Vulkan_LIBRARY} dl xcb xcb-icccm)
 endif()
 
 if (CMAKE_GENERATOR STREQUAL "Visual Studio 6")

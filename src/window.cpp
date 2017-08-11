@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <cstring>
 #include <chrono>
+#include <xcb/xcb_icccm.h>
 
 using namespace Atlas;
 
@@ -17,11 +18,13 @@ using namespace Atlas;
 #include <xcb/xcb.h>
 struct Window::xcb_info {
     xcb_connection_t* connection;
-    xcb_screen_t* screen;
     xcb_window_t window;
     xcb_generic_event_t* event;
     xcb_atom_t protocols_atom;
     xcb_atom_t delete_win_atom;
+    xcb_atom_t wm_state_atom;
+    xcb_atom_t fullscreen_atom;
+    xcb_screen_t* screen;
 };
 
 bool Window::init_xcb() {
@@ -31,14 +34,13 @@ bool Window::init_xcb() {
         return false;
     }
 
-    // TODO: Select screen manually. For now, always uses the first.
-    const xcb_setup_t* setup = xcb_get_setup(xcb->connection);
-    xcb_screen_iterator_t screen_iter = xcb_setup_roots_iterator(setup);
+    // TODO: Select screen some other way. For now, always uses the first.
+    xcb_screen_iterator_t screen_iter = xcb_setup_roots_iterator(xcb_get_setup(xcb->connection));
     xcb->screen = screen_iter.data;
 
 
     const uint32_t value_mask = XCB_CW_EVENT_MASK;
-    uint32_t value_list = XCB_EVENT_MASK_EXPOSURE;
+    uint32_t value_list = XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_STRUCTURE_NOTIFY;
 
     xcb->window = xcb_generate_id(xcb->connection);
     xcb_void_cookie_t err_cookie = xcb_create_window_checked(
@@ -50,42 +52,80 @@ bool Window::init_xcb() {
                         m_width, m_height,              // Dimensions
                         0,                              // Border width
                         XCB_WINDOW_CLASS_INPUT_OUTPUT,  // Class
-                        xcb->screen->root_visual,       // Visual
+                        xcb->screen->root_visual,        // Visual
                         value_mask, &value_list);       // Masks
 
     xcb_generic_error_t* err = xcb_request_check(xcb->connection, err_cookie);
     if (err != NULL)  {
-        std::string err_string = "Could not create window. X11 error " + err->error_code;
+        std::string err_string = "Could not create window. X11 error code " + err->error_code;
         Backend::error(err_string);
+        free(err);
         return false;
     }
+    free(err);
 
-    // We want to be notified when the window manager attempts to destroy the window
-    xcb_intern_atom_cookie_t delete_cookie = xcb_intern_atom(
-        xcb->connection, 0, strlen("WM_DELETE_WINDOW"), "WM_DELETE_WINDOW");
-    xcb_intern_atom_cookie_t protocols_cookie = xcb_intern_atom(
-        xcb->connection, 0, strlen("WM_PROTOCOLS"), "WM_PROTOCOLS");
+    xcb_size_hints_t size_hints = {};
+    xcb_icccm_size_hints_set_min_size(&size_hints, m_width, m_height);
+    xcb_icccm_size_hints_set_max_size(&size_hints, m_width, m_height);
+    xcb_icccm_set_wm_size_hints(xcb->connection, xcb->window, XCB_ATOM_WM_NORMAL_HINTS, &size_hints);
 
+    //
+    // Grab a bunch of atoms from the window
+    //
+
+    xcb_intern_atom_cookie_t delete_cookie = xcb_intern_atom(xcb->connection, 0, strlen("WM_DELETE_WINDOW"), "WM_DELETE_WINDOW");
+    xcb_intern_atom_cookie_t protocols_cookie = xcb_intern_atom(xcb->connection, 0, strlen("WM_PROTOCOLS"), "WM_PROTOCOLS");
+    xcb_intern_atom_cookie_t wm_state_cookie = xcb_intern_atom(xcb->connection, 0, strlen("_NET_WM_STATE"), "_NET_WM_STATE");
+    xcb_intern_atom_cookie_t fullscreen_cookie = xcb_intern_atom(xcb->connection, 0, strlen("_NET_WM_STATE_FULLSCREEN"), "_NET_WM_STATE_FULLSCREEN");
+
+
+    // Cache the atoms which control if the window is fullscreen
+    xcb_intern_atom_reply_t* wm_state_reply = xcb_intern_atom_reply(xcb->connection, wm_state_cookie, nullptr);
+    if (!wm_state_reply) {
+        Backend::error("Could not retrieve the window's _NET_WM_STATE atom!");
+        return false;
+    }
+    xcb->wm_state_atom = wm_state_reply->atom;
+    free(wm_state_reply);
+    xcb_intern_atom_reply_t* fullscreen_reply = xcb_intern_atom_reply(xcb->connection, fullscreen_cookie, nullptr);
+    if (!fullscreen_reply) {
+        Backend::error("Could not retrieve the window's _NET_WM_STATE_FULLSCREEN atom!");
+        return false;
+    }
+    xcb->fullscreen_atom = fullscreen_reply->atom;
+    free(fullscreen_reply);
+
+    // Notify the event handler when the close button is pressed
     xcb_intern_atom_reply_t* delete_reply = xcb_intern_atom_reply(
         xcb->connection, delete_cookie, NULL);
-    xcb_intern_atom_reply_t* protocols_reply = xcb_intern_atom_reply(
-        xcb->connection, protocols_cookie, NULL);
-
-    err_cookie = xcb_change_property_checked(xcb->connection, XCB_PROP_MODE_REPLACE, xcb->window,
-        protocols_reply->atom, 4, 32, 1, &delete_reply->atom);
-    if (err != NULL)  {
-        std::string err_string = "Could not override window delete handler. X11 error " + err->error_code;
-        Backend::error(err_string);
+    if (!delete_reply) {
+        Backend::error("Could not retrieve the window's WM_DELETE_WINDOW atom!");
         return false;
     }
-
+    xcb_intern_atom_reply_t* protocols_reply = xcb_intern_atom_reply(
+        xcb->connection, protocols_cookie, NULL);
+    if (!delete_reply) {
+        Backend::error("Could not retrieve the window's WM_PROTOCOLS atom!");
+        return false;
+    }
+    err_cookie = xcb_change_property_checked(xcb->connection, XCB_PROP_MODE_REPLACE, xcb->window,
+        protocols_reply->atom, 4, 32, 1, &delete_reply->atom);
+    err = xcb_request_check(xcb->connection, err_cookie);
+    if (err != NULL)  {
+        std::string err_string = "Could not override window delete handler. X11 error code " + err->error_code;
+        Backend::error(err_string);
+        free(err);
+        return false;
+    }
     xcb->delete_win_atom = delete_reply->atom;
     xcb->protocols_atom = protocols_reply->atom;
-
-
+    free(err);
+    free(delete_reply);
+    free(protocols_reply);
 
     // Only returns an error if the window doesn't exist -- and we just checked that it does
     xcb_map_window(xcb->connection, xcb->window);
+    set_fullscreen(m_flags & request_fullscreen);
     
     if (xcb_flush(xcb->connection) <= 0) {
         Backend::error("Error while flushing xcb stream!");
@@ -96,18 +136,26 @@ bool Window::init_xcb() {
 }
 
 void Window::handle_xcb_events() {
-    xcb_expose_event_t* expose;
-    xcb_client_message_event_t* cm;
-
     while ( (xcb->event = xcb_poll_for_event(xcb->connection)) ) {
         switch (xcb->event->response_type & ~0x80) {
-        case XCB_CLIENT_MESSAGE:
-            cm = reinterpret_cast<xcb_client_message_event_t*>(xcb->event);
-            if (cm->data.data32[0] == xcb->delete_win_atom) {
-                m_should_close = true;
+        case XCB_CLIENT_MESSAGE: {
+            xcb_client_message_event_t* client_event = reinterpret_cast<xcb_client_message_event_t*>(xcb->event);
+            if (client_event->window == xcb->window && client_event->type == xcb->protocols_atom && client_event->data.data32[0] == xcb->delete_win_atom) {
+                m_flags |= request_close;
             }
 
             break;
+        }
+        case XCB_CONFIGURE_NOTIFY: {
+            Backend::log("Resize requested...");
+            const xcb_configure_notify_event_t* cfg_event = reinterpret_cast<const xcb_configure_notify_event_t*>(xcb->event);
+            if (  ((m_desired_width == m_width) && (m_desired_height == m_height))
+            && ((cfg_event->width != m_width) || (cfg_event->height != m_height))  ) {
+                m_desired_width = cfg_event->width;
+                m_desired_height = cfg_event->height;
+                m_flags |= swapchain_is_old;
+            }
+        }
 /*
         case XCB_EXPOSE:
             expose = reinterpret_cast<xcb_expose_event_t*>(xcb->event);
@@ -147,23 +195,41 @@ struct Window::win32_info {
 
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    LONG_PTR lpUserData;
-    Atlas::Window* window;
-
     switch (msg) {
-    case WM_CLOSE:
-        lpUserData = GetWindowLongPtr(hWnd, GWLP_USERDATA);
-        window = reinterpret_cast<Atlas::Window*>(lpUserData);
+    case WM_CLOSE: {
+        LONG_PTR lpUserData = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+        Atlas::Window* window = reinterpret_cast<Atlas::Window*>(lpUserData);
         if (window)
             window->set_should_close(true);
 
         break;
+    }
     case WM_DESTROY:
         DestroyWindow(hWnd);
         PostQuitMessage(0);
         break;
     case WM_PAINT:
         ValidateRect(hWnd, NULL);
+        break;
+    case WM_SIZE:
+        if (  ((m_desired_width == m_width) && (m_desired_height == m_height) && (wParam != SIZE_MINIMIZED) {
+            if ( (m_flags & resizing) || ((wParam == SIZE_MAXIMIZED) || (wParam == SIZE_RESTORED)) ) {
+                m_desired_width = LOWORD(lParam);
+                m_desired_height = HIWORD(lParam);
+                m_flags |= swapchain_is_old;
+            }
+        }
+            && ((cfg_event->width != m_width) || (cfg_event->height != m_height))  ) {
+                m_desired_width = cfg_event->width;
+                m_desired_height = cfg_event->height;
+                m_flags |= swapchain_is_old;
+            }
+        break;
+    case WM_ENTERSIZEMOVE:
+        m_flags |= resizing;
+        break;
+    case WM_EXITSIZEMOVE:
+        m_flags &= (~resizing);
         break;
     default:
         return DefWindowProc(hWnd, msg, wParam, lParam);
@@ -197,15 +263,14 @@ bool Window::init_win32() {
         return false;
     }
 
-
+    long dwStyle = WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_OVERLAPPED | WS_BORDER | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     win32->hwnd = CreateWindowEx(
                 WS_EX_APPWINDOW,        // Extended style
                 m_name.c_str(),         // Class name
                 m_name.c_str(),         // Window title
-                WS_CLIPSIBLINGS |       // Window style
-                WS_CLIPCHILDREN |       // Window style (cont)
-                WS_OVERLAPPEDWINDOW,    // Window style (cont)
-                0, 0,                   // Position
+                dwStyle,                // Window style
+                CW_USEDEFAULT,          // Width
+                CW_USEDEFAULT,          // Height
                 m_width, m_height,      // Dimensions
                 NULL,                   // No parent window
                 NULL,                   // No menu
@@ -217,8 +282,17 @@ bool Window::init_win32() {
         return false;
     }
 
+    RECT rect;
+    rect.left = 0;
+    rect.top = 0;
+    rect.right = m_width;
+    rect.bottom = m_height;
+    SetWindowLongPtr(hWnd, GWL_STYLE, dwStyle | WS_VISIBLE);
+    AdjustWindowRect(&rect, dwStyle, FALSE); // Make the client area (not the window) equal to the desired surface size
     SetWindowLongPtr(win32->hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
+
+    set_fullscreen(m_flags & request_fullscreen);
     ShowWindow(win32->hwnd, SW_SHOW);
     return true;
 }
@@ -248,9 +322,8 @@ Window::Window(const Backend::Instance& instance, const std::string& name, uint3
 
 
 Window::Window(const Backend::Instance& instance, uint32_t physical_device_index, const std::string& name, uint32_t width, uint32_t height)
-    : m_name(name), m_width(width), m_height(height), m_fullscreen(false), m_vsync(true)
-    , m_should_close(false), m_n_swapchain_images(3), m_instance(instance), m_device(nullptr), m_frame_index(0)
-    , m_physical_device_index(physical_device_index), m_surface(VK_NULL_HANDLE), m_swapchain(VK_NULL_HANDLE)
+    : m_name(name), m_width(width), m_height(height), m_flags(0), m_n_swapchain_images(3), m_frame_index(0), m_desired_width(width), m_desired_height(height)
+    , m_instance(instance), m_device(nullptr), m_physical_device_index(physical_device_index), m_surface(VK_NULL_HANDLE), m_swapchain(VK_NULL_HANDLE)
     , m_depth(VK_NULL_HANDLE), m_depth_view(VK_NULL_HANDLE), vkCreateSwapchainKHR(VK_NULL_HANDLE), vkGetSwapchainImagesKHR(VK_NULL_HANDLE)
     , vkAcquireNextImageKHR(VK_NULL_HANDLE), vkQueuePresentKHR(VK_NULL_HANDLE), vkGetPhysicalDeviceFormatProperties(VK_NULL_HANDLE)
 {
@@ -267,6 +340,14 @@ Window::Window(const Backend::Instance& instance, uint32_t physical_device_index
     vkCreateXcbSurfaceKHR = reinterpret_cast<PFN_vkCreateXcbSurfaceKHR>( vkGetInstanceProcAddr(instance.vk(), "vkCreateXcbSurfaceKHR") );
 #endif
     // Swapchain functions are loaded when the device is initialized
+
+#   ifdef _WIN32
+        win32 = static_cast<win32_info*>(malloc(sizeof(win32_info)));
+        memset(win32, 0, sizeof(win32_info));
+#   else
+        xcb = static_cast<xcb_info*>(malloc(sizeof(xcb_info)));
+        memset(xcb, 0, sizeof(xcb_info));
+#   endif
 }
 
 Window::~Window() {
@@ -350,6 +431,11 @@ bool Window::init_surface() {
 }
 
 bool Window::init_swapchain(Backend::Device* device) {
+    if (!device) {
+        Backend::error("init_swapchain called with null device handle!");
+        return false;
+    }
+
     m_device = device;
     // If we don't make the new swapchain a derivative of the old one, all the resources have to be reloaded
     // (which is obviously too much for changing vsync)
@@ -395,7 +481,7 @@ bool Window::init_swapchain(Backend::Device* device) {
 
     // Swapchain present mode
     VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
-    if (!m_vsync) {
+    if (!(m_flags & vsync)) {
         // TODO: Look into VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR
         for (const auto& mode : m_present_modes) {
             if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
@@ -484,8 +570,12 @@ bool Window::init_swapchain(Backend::Device* device) {
     if (!validate(res)) return false;
 
     // If this was a re-creation of an existing swapchain, destroy the old one
-    // (also cleans up all the presentable images)
+    // (also cleans up all the presentable images and semaphores)
     if (old_swapchain != VK_NULL_HANDLE) {
+        for (auto& semaphore : m_image_available_semaphores) {
+            vkDestroySemaphore(device->vk(), semaphore, nullptr);
+        }
+        vkDestroyImageView(device->vk(), m_depth_view, nullptr);
         for (auto& view : m_image_views) {
             vkDestroyImageView(device->vk(), view, nullptr);
         }
@@ -659,12 +749,8 @@ bool Window::init_swapchain(Backend::Device* device) {
 
 bool Window::init() {
 #   ifdef _WIN32
-        win32 = static_cast<win32_info*>(malloc(sizeof(win32_info)));
-        memset(&win32, sizeof(win32_info), 0);
         return init_win32() && init_surface();
 #   else
-        xcb = static_cast<xcb_info*>(malloc(sizeof(xcb_info)));
-        memset(&xcb, sizeof(xcb_info), 0);
         return init_xcb() && init_surface();
 #   endif
 }
@@ -688,13 +774,13 @@ void Window::close() {
 }
 
 bool Window::acquire_next_frame(uint64_t timeout, VkFence fence) {
-    return validate( vkAcquireNextImageKHR(m_device->vk(), m_swapchain, timeout, m_image_available_semaphores[m_frame_index], fence, &m_frame_index) );
+    VkResult res = vkAcquireNextImageKHR(m_device->vk(), m_swapchain, timeout, m_image_available_semaphores[m_frame_index], fence, &m_frame_index);
+    if ((res == VK_SUBOPTIMAL_KHR) || (res == VK_ERROR_OUT_OF_DATE_KHR))
+        m_flags |= swapchain_is_old;
+    return validate(res);
 }
 
 bool Window::present(const std::vector<VkSemaphore> wait_semaphores) {
-    std::string msg = "Presenting frame ";
-    msg += m_frame_index;
-    Backend::log(msg);
     VkPresentInfoKHR present_info = {
         VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, // sType
         nullptr,                            // pNext
@@ -706,4 +792,81 @@ bool Window::present(const std::vector<VkSemaphore> wait_semaphores) {
         nullptr                             // pResults
     };
     return validate( vkQueuePresentKHR(m_present_queue, &present_info) );
+}
+
+bool Window::set_fullscreen(bool full) {
+#ifdef _WIN32
+    if (full) {
+        SetWindowLongPtr(win32->hwnd, GWL_STYLE, WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE);
+        MoveWindow(win32->hwnd, 0, 0, m_width, m_height, TRUE);
+
+        DEVMODE dm;
+        dm.dmSize = sizeof(DEVMODE);
+        dm.dmPelsWidth = m_width;
+        dm.dmPelsHeight = m_height;
+        dm.dmBitsPerPel = 32; // If this isn't supported, you shouldn't be running vulkan
+        dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL;
+        return (ChangeDisplaySettings(&dm, 0) == DISP_CHANGE_SUCCESSFUL);
+    } else {
+        RECT rect;
+        rect.left = 0;
+        rect.top = 0;
+        rect.right = m_width;
+        rect.bottom = m_height;
+        SetWindowLongPtr(win32->hwnd, GWL_STYLE, WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_OVERLAPPED | WS_BORDER | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE);
+        AdjustWindowRect(&rect, WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_OVERLAPPED | WS_BORDER | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE);
+        MoveWindow(win32->hwnd, 0, 0, rect.right-rect.left, rect.bottom-rect.top, TRUE);
+        return (ChangeDisplaySettings(0, 0) == DISP_CHANGE_SUCCESSFUL);
+    }
+#else
+    xcb_client_message_event_t ev = {};
+    ev.response_type = XCB_CLIENT_MESSAGE;
+    ev.type = xcb->wm_state_atom;
+    ev.format = 32;
+    ev.window = xcb->window;
+    memset(ev.data.data32, 0, 5 * sizeof(uint32_t));
+    ev.data.data32[0] = _NET_WM_STATE_TOGGLE;
+    if (full) {
+        m_flags |= request_fullscreen;
+        ev.data.data32[0] = _NET_WM_STATE_ADD;
+    }
+    else {
+        m_flags &= (~request_fullscreen);
+        ev.data.data32[0] = _NET_WM_STATE_REMOVE;
+    }
+    ev.data.data32[1] = xcb->fullscreen_atom;
+
+    if (xcb->window && xcb->connection) {
+        if ( full != (m_flags & current_fullscreen) ) { // If fullscreen requested, and currently windowed; or if windowed requested and currently fullscreen
+            xcb_void_cookie_t err_cookie = xcb_send_event_checked (xcb->connection, 1, xcb->screen->root, XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY, reinterpret_cast<const char*>(&ev));
+            xcb_generic_error_t* err = xcb_request_check(xcb->connection, err_cookie);
+            if (err != NULL)  {
+                std::string err_string = "Could not toggle fullscreen! X11 error code " + err->error_code;
+                Backend::error(err_string);
+                free(err);
+                return false;
+            }
+            free(err);
+            if (xcb_flush(xcb->connection) <= 0) {
+                Backend::error("Error while flushing xcb stream!");
+                return false;
+            }
+
+            if (full) m_flags |= current_fullscreen;
+            else m_flags &= (~current_fullscreen);
+        }
+    }
+
+    return true;
+#endif
+}
+
+bool Window::recreate_swapchain() {
+    Backend::log("Recreating swapchain...");
+    m_width = m_desired_width;
+    m_height = m_desired_height;
+    m_flags &= (~swapchain_is_old);
+
+    vkDeviceWaitIdle(m_device->vk());
+    return init_swapchain(m_device);
 }

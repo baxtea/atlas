@@ -8,7 +8,7 @@
 #define VMA_STATS_STRING_ENABLED 0
 #include <string.h>
 
-// explodes if `min` and `max` are existing macros -- which they are in Windows
+// vk_mem_alloc explodes if `min` and `max` are existing macros -- which they are in Windows
 #undef min
 #undef max
 #include "vk_mem_alloc.h"
@@ -160,10 +160,6 @@ namespace Atlas {
             static constexpr uint32_t transfer_is_dedicated = 1 << 3;
             static constexpr uint32_t present_is_dedicated = 1 << 4;
             uint32_t m_queue_flags;
-
-            PFN_vkDestroySemaphore vkDestroySemaphore;
-            PFN_vkDestroyImageView vkDestroyImageView;
-            PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
         };
 
         struct CommandBuffer {
