@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <cstring>
 #include <chrono>
-#include <xcb/xcb_icccm.h>
 
 using namespace Atlas;
 
@@ -16,6 +15,7 @@ using namespace Atlas;
 #ifndef _WIN32
 
 #include <xcb/xcb.h>
+#include <xcb/xcb_icccm.h>
 struct Window::xcb_info {
     xcb_connection_t* connection;
     xcb_window_t window;
@@ -194,13 +194,17 @@ struct Window::win32_info {
 };
 
 
-LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK g_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    LONG_PTR lpUserData = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    Atlas::Window* window = reinterpret_cast<Atlas::Window*>(lpUserData);
+
+    return window->WndProc(hWnd, msg, wParam, lParam);
+}
+
+LRESULT CALLBACK Window::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_CLOSE: {
-        LONG_PTR lpUserData = GetWindowLongPtr(hWnd, GWLP_USERDATA);
-        Atlas::Window* window = reinterpret_cast<Atlas::Window*>(lpUserData);
-        if (window)
-            window->set_should_close(true);
+        m_flags |= request_close;
 
         break;
     }
@@ -212,18 +216,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         ValidateRect(hWnd, NULL);
         break;
     case WM_SIZE:
-        if (  ((m_desired_width == m_width) && (m_desired_height == m_height) && (wParam != SIZE_MINIMIZED) {
+        if (  (m_desired_width == m_width) && (m_desired_height == m_height) && (wParam != SIZE_MINIMIZED) ) {
             if ( (m_flags & resizing) || ((wParam == SIZE_MAXIMIZED) || (wParam == SIZE_RESTORED)) ) {
                 m_desired_width = LOWORD(lParam);
                 m_desired_height = HIWORD(lParam);
                 m_flags |= surface_changed;
             }
         }
-            && ((cfg_event->width != m_width) || (cfg_event->height != m_height))  ) {
-                m_desired_width = cfg_event->width;
-                m_desired_height = cfg_event->height;
-                m_flags |= surface_changed;
-            }
         break;
     case WM_ENTERSIZEMOVE:
         m_flags |= resizing;
@@ -246,7 +245,7 @@ bool Window::init_win32() {
 
     wc.cbSize           = sizeof(WNDCLASSEX);
     wc.style            = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
-    wc.lpfnWndProc      = (WNDPROC)WndProc;
+    wc.lpfnWndProc      = (WNDPROC)g_WndProc;
     wc.cbClsExtra       = 0;
     wc.cbWndExtra       = 0;
     wc.hInstance        = win32->inst;
@@ -287,7 +286,7 @@ bool Window::init_win32() {
     rect.top = 0;
     rect.right = m_width;
     rect.bottom = m_height;
-    SetWindowLongPtr(hWnd, GWL_STYLE, dwStyle | WS_VISIBLE);
+    SetWindowLongPtr(win32->hwnd, GWL_STYLE, dwStyle | WS_VISIBLE);
     AdjustWindowRect(&rect, dwStyle, FALSE); // Make the client area (not the window) equal to the desired surface size
     SetWindowLongPtr(win32->hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
@@ -300,7 +299,7 @@ bool Window::init_win32() {
 void Window::handle_win32_events() {
     while (PeekMessage(&win32->msg, NULL, 0, 0, PM_REMOVE)) {
         if (win32->msg.message == WM_QUIT)
-            m_should_close = true;
+            m_flags |= request_close;
         
         TranslateMessage(&win32->msg);
         DispatchMessage(&win32->msg);

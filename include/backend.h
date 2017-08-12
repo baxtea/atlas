@@ -208,7 +208,7 @@ namespace Atlas {
         protected:
             VkQueue m_queue;
             VkCommandBuffer m_buffer;
-        }
+        };
     }
 }
 

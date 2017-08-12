@@ -6,7 +6,7 @@
 #endif
 
 using namespace Atlas;
-        constexpr glm::vec3 VEC3_0(0,0,0);
+GLM_CONSTEXPR_CTOR glm::vec3 VEC3_0(0,0,0);
 
 glm::quat Math::get_rotation_to(const glm::vec3& u, const glm::vec3& v, const glm::vec3& fallback_axis) {
     // From Sam Hocevar's article Quaternion from two vectors: the final version'

@@ -14,6 +14,8 @@
 #define VK_USE_PLATFORM_XCB_KHR
 #endif
 #include <vulkan/vulkan.h>
+#undef min
+#undef max
 
 namespace Atlas {
     namespace Backend {
@@ -115,6 +117,7 @@ namespace Atlas {
         inline VkFormat get_color_format() const {
             return m_color_format;
         }
+        LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
     protected:
         friend struct Backend::Device;
 #ifdef _WIN32

@@ -8,10 +8,10 @@
 
 using namespace Atlas;
 
-constexpr glm::vec3 UNIT_X(1, 0, 0);
-constexpr glm::vec3 UNIT_Y(0, 1, 0);
-constexpr glm::vec3 UNIT_Z(0, 0, 1);
-constexpr glm::vec3 VEC3_0(0, 0, 0);
+GLM_CONSTEXPR_CTOR glm::vec3 UNIT_X(1, 0, 0);
+GLM_CONSTEXPR_CTOR glm::vec3 UNIT_Y(0, 1, 0);
+GLM_CONSTEXPR_CTOR glm::vec3 UNIT_Z(0, 0, 1);
+GLM_CONSTEXPR_CTOR glm::vec3 VEC3_0(0, 0, 0);
 
 
 Camera::Camera(const std::string& name) : m_name(name), m_view_is_old(true) {
